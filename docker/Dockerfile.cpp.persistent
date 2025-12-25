@@ -1,0 +1,26 @@
+FROM gcc:latest
+
+WORKDIR /app
+
+# Install Python for WebSocket server
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install websockets library
+RUN pip3 install --no-cache-dir websockets --break-system-packages
+
+# Create non-root user
+RUN useradd -m -s /bin/bash runner && \
+    chown -R runner:runner /app
+
+# Copy the executor script
+COPY executor-cpp.py /app/executor.py
+
+USER runner
+
+EXPOSE 8765
+
+# Run the WebSocket server
+CMD ["python3", "/app/executor.py"]

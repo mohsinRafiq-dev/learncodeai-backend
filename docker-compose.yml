@@ -1,0 +1,19 @@
+version: '3.8'
+
+services:
+  learncode-ai-backend:
+    build: .
+    ports:
+      - "4000:4000"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./temp:/app/temp
+    environment:
+      - NODE_ENV=production
+    depends_on:
+      - docker
+    privileged: true
+
+networks:
+  default:
+    driver: bridge

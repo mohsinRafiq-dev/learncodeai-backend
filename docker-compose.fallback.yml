@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  learncode-ai-backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./temp:/app/temp:rw
+      - ./logs:/app/logs:rw
+    environment:
+      - NODE_ENV=production
+    
+    # Security enhancements
+    security_opt:
+      - no-new-privileges:true
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+        reservations:
+          memory: 256M
+          cpus: '0.25'
+    
+    # Capabilities - drop all unnecessary capabilities
+    cap_drop:
+      - ALL
+    cap_add:
+      - SETUID
+      - SETGID
+    
+    restart: unless-stopped
+    
+    depends_on:
+      - python-executor
+      - javascript-executor
+    
+    networks:
+      - learncode-ai-network
+
+  python-executor:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.python.fallback
+    ports:
+      - "8765:8765"
+    
+    # Security configurations
+    security_opt:
+      - no-new-privileges:true
+    
+    # Resource limits for code execution container
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.3'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    
+    cap_drop:
+      - ALL
+    
+    read_only: true
+    
+    # Temporary filesystem for execution
+    tmpfs:
+      - /tmp:noexec,nosuid,size=50m
+    
+    restart: unless-stopped
+    networks:
+      - learncode-ai-network
+
+  javascript-executor:
+    build:
+      context: ./docker
+      dockerfile: Dockerfile.javascript.fallback
+    ports:
+      - "8766:8765"
+    
+    security_opt:
+      - no-new-privileges:true
+    
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.3'
+        reservations:
+          memory: 128M
+          cpus: '0.1'
+    
+    cap_drop:
+      - ALL
+    
+    read_only: true
+    
+    tmpfs:
+      - /tmp:noexec,nosuid,size=50m
+    
+    restart: unless-stopped
+    networks:
+      - learncode-ai-network
+
+networks:
+  learncode-ai-network:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.enable_icc: "false"
+    internal: false

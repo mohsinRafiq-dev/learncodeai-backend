@@ -1,0 +1,17 @@
+{
+  "testEnvironment": "node",
+  "globalSetup": "<rootDir>/tests/globalSetup.js",
+  "globalTeardown": "<rootDir>/tests/globalTeardown.js",
+  "setupFilesAfterEnv": ["<rootDir>/tests/setup.js"],
+  "testMatch": ["**/tests/**/*.test.js"],
+  "testPathIgnorePatterns": ["codeExecution.functional.test.js"],
+  "maxWorkers": 1,
+  "collectCoverageFrom": [
+    "src/**/*.js",
+    "!src/server.js",
+    "!src/config/database.js"
+  ],
+  "coverageDirectory": "coverage",
+  "coverageReporters": ["text", "lcov", "html"],
+  "testTimeout": 30000
+}

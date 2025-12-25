@@ -1,0 +1,45 @@
+# Fallback C++ Dockerfile
+FROM gcc:latest
+
+# Security: Create non-root user first
+RUN groupadd -r runner && useradd -r -g runner -d /app -s /sbin/nologin runner
+
+WORKDIR /app
+
+# Update packages and install Python for WebSocket server
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        python3 \
+        python3-pip \
+        python3-venv \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+
+# Create virtual environment and install websockets
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+RUN pip install --no-cache-dir websockets
+
+# Copy the executor script
+COPY --chown=runner:runner executor-cpp.py /app/executor.py
+
+# Set proper permissions
+RUN chmod 555 /app/executor.py
+
+# Create restricted temp and compilation directories
+RUN mkdir -p /app/temp /app/compile && \
+    chown runner:runner /app/temp /app/compile && \
+    chmod 700 /app/temp /app/compile
+
+# Switch to non-root user
+USER runner
+
+EXPOSE 8765
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD /opt/venv/bin/python -c "import socket; s=socket.socket(); s.connect(('localhost', 8765)); s.close()" || exit 1
+
+# Run the WebSocket server
+CMD ["/opt/venv/bin/python", "/app/executor.py"]

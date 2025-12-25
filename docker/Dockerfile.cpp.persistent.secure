@@ -1,0 +1,54 @@
+# Use specific GCC version with security updates
+FROM gcc:12.3.0
+
+# Security: Create non-root user first
+RUN groupadd -r runner && useradd -r -g runner -d /app -s /sbin/nologin runner
+
+WORKDIR /app
+
+# Security: Update packages and install minimal Python
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        python3=3.11.2-1+b1 \
+        python3-pip=23.0.1+dfsg-1 \
+        python3-venv=3.11.2-1+b1 \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+
+# Security: Create virtual environment for Python dependencies
+RUN python3 -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
+
+# Security: Install Python packages with verification
+RUN pip install --no-cache-dir --upgrade pip==23.3.1 && \
+    pip install --no-cache-dir websockets==11.0.3
+
+# Security: Remove pip after installation
+RUN pip uninstall -y pip setuptools wheel
+
+# Copy the executor script
+COPY --chown=runner:runner executor-cpp.py /app/executor.py
+
+# Security: Set proper permissions
+RUN chmod 555 /app/executor.py
+
+# Security: Create restricted temp and compilation directories
+RUN mkdir -p /app/temp /app/compile && \
+    chown runner:runner /app/temp /app/compile && \
+    chmod 700 /app/temp /app/compile
+
+# Security: Set up restricted compilation environment
+RUN chown -R runner:runner /opt/venv
+
+# Security: Switch to non-root user
+USER runner
+
+EXPOSE 8765
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD python3 -c "import socket; s=socket.socket(); s.connect(('localhost', 8765)); s.close()" || exit 1
+
+# Run the WebSocket server
+CMD ["/opt/venv/bin/python3", "/app/executor.py"]

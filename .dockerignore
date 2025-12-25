@@ -1,0 +1,37 @@
+# .dockerignore for security - exclude sensitive files
+.env
+.env.*
+*.log
+logs/
+temp/
+node_modules/
+.git/
+.gitignore
+README.md
+docs/
+tests/
+testsBackup/
+*.md
+.vscode/
+.idea/
+uploads/profile-pictures/
+test_output.txt
+test_result.txt
+
+# Exclude development files
+*.dev.*
+*.local.*
+docker-compose.override.yml
+
+# Exclude security-sensitive files
+*.key
+*.pem
+*.p12
+*.pfx
+secrets/
+private/
+
+# Exclude backup files
+*.backup
+*.bak
+*.old

@@ -1,0 +1,34 @@
+﻿# Fallback Python Dockerfile using local image
+FROM python:3.11-slim
+
+# Security: Create non-root user first  
+RUN groupadd -r runner && useradd -r -g runner -d /app -s /sbin/nologin runner
+
+WORKDIR /app
+
+# Security: Update packages
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install websockets with retry logic
+RUN pip install --no-cache-dir --retries 5 --timeout 30 websockets || \
+    pip install --no-cache-dir --index-url https://pypi.python.org/simple/ websockets
+
+# Copy executor script
+COPY --chown=runner:runner executor-python.py /app/executor.py
+RUN chmod 555 /app/executor.py
+
+# Create restricted temp directory
+RUN mkdir -p /app/temp && \
+    chown runner:runner /app/temp && \
+    chmod 700 /app/temp
+
+USER runner
+EXPOSE 8765
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD python -c "import socket; s=socket.socket(); s.connect(('localhost', 8765)); s.close()" || exit 1
+
+CMD ["python", "/app/executor.py"]

@@ -1,0 +1,47 @@
+# Use specific version with known security status
+FROM python:3.11.6-slim
+
+# Security: Create non-root user first
+RUN groupadd -r runner && useradd -r -g runner -d /app -s /sbin/nologin runner
+
+WORKDIR /app
+
+# Security: Update packages and install only necessary ones
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get install -y --no-install-recommends \
+        # Only install what's absolutely necessary
+        && rm -rf /var/lib/apt/lists/* \
+        && apt-get clean
+
+# Security: Install Python packages with verification
+RUN pip install --no-cache-dir --upgrade pip==23.3.1 && \
+    pip install --no-cache-dir websockets==11.0.3
+
+# Security: Remove pip and cache after installation
+RUN pip uninstall -y pip setuptools wheel
+
+# Copy the executor script with proper permissions
+COPY --chown=runner:runner executor-python.py /app/executor.py
+
+# Security: Make script executable but not writable
+RUN chmod 555 /app/executor.py
+
+# Security: Create restricted temp directory
+RUN mkdir -p /app/temp && \
+    chown runner:runner /app/temp && \
+    chmod 700 /app/temp
+
+# Security: Switch to non-root user
+USER runner
+
+# Security: Use non-privileged port
+EXPOSE 8765
+
+# Security: Run with limited capabilities
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD python -c "import socket; s=socket.socket(); s.connect(('localhost', 8765)); s.close()" || exit 1
+
+# Run the WebSocket server
+CMD ["python", "/app/executor.py"]

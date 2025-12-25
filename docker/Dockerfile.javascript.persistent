@@ -1,0 +1,20 @@
+FROM node:18-slim
+
+WORKDIR /app
+
+# Copy executor script first
+COPY executor-javascript.js /app/executor.js
+
+# Install ws package locally
+RUN npm install ws
+
+# Create non-root user
+RUN useradd -m -s /bin/bash runner && \
+    chown -R runner:runner /app
+
+USER runner
+
+EXPOSE 8765
+
+# Run the WebSocket server
+CMD ["node", "/app/executor.js"]

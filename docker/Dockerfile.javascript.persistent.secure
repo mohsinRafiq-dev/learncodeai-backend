@@ -1,0 +1,46 @@
+# Use specific Node.js version with security patches
+FROM node:18.18.2-slim
+
+# Security: Create non-root user first
+RUN groupadd -r runner && useradd -r -g runner -d /app -s /sbin/nologin runner
+
+WORKDIR /app
+
+# Security: Update packages
+RUN apt-get update && \
+    apt-get upgrade -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy package files first for better caching
+COPY --chown=runner:runner package*.json ./
+
+# Security: Install only production dependencies with audit
+RUN npm ci --only=production --audit --audit-level=moderate && \
+    npm cache clean --force
+
+# Copy executor script
+COPY --chown=runner:runner executor-javascript.js /app/executor.js
+
+# Security: Set proper permissions
+RUN chmod 555 /app/executor.js
+
+# Security: Create restricted temp directory
+RUN mkdir -p /app/temp && \
+    chown runner:runner /app/temp && \
+    chmod 700 /app/temp
+
+# Security: Remove npm after installation to reduce attack surface
+RUN npm uninstall -g npm
+
+# Security: Switch to non-root user
+USER runner
+
+EXPOSE 8765
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD node -e "const net=require('net'); const s=net.createConnection(8765,'localhost'); s.on('connect',()=>process.exit(0)); s.on('error',()=>process.exit(1))"
+
+# Run the WebSocket server
+CMD ["node", "/app/executor.js"]
