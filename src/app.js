@@ -23,6 +23,8 @@ import codeHelpRoutes from "./routes/codeHelpRoutes.js";
 import codeChatRoutes from "./routes/codeChatRoutes.js";
 import viewTrackingRoutes from "./routes/viewTrackingRoutes.js";
 import newsletterRoutes from "./routes/newsletterRoutes.js";
+import practiceQuizRoutes from "./routes/practiceQuizRoutes.js";
+import discussionRoutes from "./routes/discussionRoutes.js";
 import connectDB from "./config/database.js";
 import passport, { initializeOAuthStrategies } from "./config/oauthConfig.js";
 import emailService from "./services/emailService.js";
@@ -50,7 +52,11 @@ if (Array.isArray(logger)) {
 
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    origin: [
+      process.env.FRONTEND_URL || "http://localhost:5173",
+      "http://localhost:5174",
+      "http://localhost:5175",
+    ],
     credentials: true,
   })
 );
@@ -101,6 +107,10 @@ app.use("/api/codehelp", codeHelpRoutes);
 app.use("/api/codechat", codeChatRoutes);
 app.use("/api/views", viewTrackingRoutes);
 app.use("/api/newsletter", newsletterRoutes);
+app.use("/api/practice-quizzes", practiceQuizRoutes);
+console.log("✅ Practice quiz routes registered at /api/practice-quizzes");
+app.use("/api/discussions", discussionRoutes);
+console.log("✅ Discussion forum routes registered at /api/discussions");
 
 // 404 handler
 app.use((req, res) => {

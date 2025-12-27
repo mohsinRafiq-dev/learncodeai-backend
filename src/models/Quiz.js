@@ -67,6 +67,29 @@ const quizSchema = new mongoose.Schema(
       type: mongoose.Schema.Types.ObjectId,
       ref: "CourseSection",
     },
+    // For standalone practice quizzes
+    createdBy: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "User",
+    },
+    isAIGenerated: {
+      type: Boolean,
+      default: false,
+    },
+    language: {
+      type: String,
+      enum: ["python", "cpp", "javascript"],
+      lowercase: true,
+    },
+    topic: {
+      type: String,
+      trim: true,
+    },
+    difficulty: {
+      type: String,
+      enum: ["beginner", "intermediate", "advanced"],
+      default: "beginner",
+    },
     questions: [questionSchema],
     totalPoints: {
       type: Number,
@@ -120,4 +143,3 @@ quizSchema.pre("save", function (next) {
 
 const Quiz = mongoose.model("Quiz", quizSchema);
 export default Quiz;
-

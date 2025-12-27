@@ -13,15 +13,16 @@ async function startServer() {
     await containerManager.startAllContainers();
 
     server.listen(PORT, "0.0.0.0", () => {
+      console.log(`🚀 Server running on port ${PORT}`);
     });
   } catch (error) {
+    console.error("Failed to start server:", error);
     process.exit(1);
   }
 }
 
 // Graceful shutdown
 async function shutdown() {
-
   // Close WebSocket connections
   codeExecutorWSService.closeAllConnections();
 
@@ -43,9 +44,7 @@ async function shutdown() {
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
 
-server.on("error", (error) => {
-});
+server.on("error", (error) => {});
 
 // Start the server
 startServer();
-
