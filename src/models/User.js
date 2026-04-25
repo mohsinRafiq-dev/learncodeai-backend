@@ -134,6 +134,18 @@ const userSchema = new mongoose.Schema(
         timestamp: { type: Date, default: Date.now },
       },
     ],
+
+    // Gamification
+    gamification: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "UserGamification",
+      default: null,
+    },
+    streak: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Streak",
+      default: null,
+    },
   },
   { timestamps: true }
 );

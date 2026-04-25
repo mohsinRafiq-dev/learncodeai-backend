@@ -3,6 +3,7 @@ import UserSavedTutorial from '../models/UserSavedTutorial.js';
 import Feedback from '../models/Feedback.js';
 import openaiService from '../services/openaiService.js';
 import geminiService from '../services/geminiService.js';
+import gamificationService from '../services/gamificationService.js';
 
 class TutorialController {
   // Get all pre-generated tutorials, optionally filtered by language
@@ -285,6 +286,9 @@ class TutorialController {
           message: 'Saved tutorial not found'
         });
       }
+
+      // Check if tutorial just got completed
+      const wasCompleted = savedTutorial.progress.isCompleted;
       
       // Update progress
       if (isCompleted !== undefined) {
@@ -313,6 +317,17 @@ class TutorialController {
       savedTutorial.updatedAt = new Date();
       
       await savedTutorial.save();
+
+      // Award points if just completed
+      if (isCompleted && !wasCompleted) {
+        await gamificationService.addPoints(
+          userId,
+          50, // 50 points for tutorial completion
+          'tutorial_completed',
+          tutorialId
+        );
+        await gamificationService.updateStreak(userId);
+      }
       
       res.status(200).json({
         success: true,

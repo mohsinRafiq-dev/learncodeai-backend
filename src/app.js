@@ -25,9 +25,11 @@ import viewTrackingRoutes from "./routes/viewTrackingRoutes.js";
 import newsletterRoutes from "./routes/newsletterRoutes.js";
 import practiceQuizRoutes from "./routes/practiceQuizRoutes.js";
 import discussionRoutes from "./routes/discussionRoutes.js";
+import gamificationRoutes from "./routes/gamificationRoutes.js";
 import connectDB from "./config/database.js";
 import passport, { initializeOAuthStrategies } from "./config/oauthConfig.js";
 import emailService from "./services/emailService.js";
+import gamificationService from "./services/gamificationService.js";
 
 // Connect to MongoDB
 connectDB();
@@ -111,6 +113,11 @@ app.use("/api/practice-quizzes", practiceQuizRoutes);
 console.log("✅ Practice quiz routes registered at /api/practice-quizzes");
 app.use("/api/discussions", discussionRoutes);
 console.log("✅ Discussion forum routes registered at /api/discussions");
+app.use("/api/gamification", gamificationRoutes);
+console.log("✅ Gamification routes registered at /api/gamification");
+
+// Initialize default badges on startup
+gamificationService.initializeBadges();
 
 // 404 handler
 app.use((req, res) => {

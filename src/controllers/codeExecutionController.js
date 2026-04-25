@@ -1,9 +1,11 @@
 import codeExecutorWSService from '../services/codeExecutorWSService.js';
+import gamificationService from '../services/gamificationService.js';
 
 class CodeExecutionController {
   async executeCode(req, res) {
     try {
       const { code, language, input } = req.body;
+      const userId = req.user?._id;
 
       if (!code || !language) {
         return res.status(400).json({
@@ -14,6 +16,17 @@ class CodeExecutionController {
 
       // Execute code
       const result = await codeExecutorWSService.executeCode(code, language, input);
+
+      // Award points for successful execution
+      if (userId && result && !result.error) {
+        await gamificationService.addPoints(
+          userId,
+          15, // 15 points for successful code execution
+          'code_executed',
+          null
+        );
+        await gamificationService.updateStreak(userId);
+      }
 
       res.status(200).json({
         success: true,
