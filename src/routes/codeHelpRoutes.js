@@ -13,5 +13,8 @@ router.post('/problem-hint', auth, codeHelpController.getProblemHint);
 // Ask a code question (teaching mode - no code)
 router.post('/ask-question', auth, codeHelpController.askCodeQuestion);
 
+// Get code optimization suggestions
+router.post('/optimize', auth, codeHelpController.getCodeOptimization);
+
 export default router;
 

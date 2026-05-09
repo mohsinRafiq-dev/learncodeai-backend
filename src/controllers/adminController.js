@@ -684,6 +684,68 @@ export const getPendingCertificates = async (req, res) => {
   }
 };
 
+// Get all certificates (pending, approved, rejected)
+export const getAllCertificates = async (req, res) => {
+  try {
+    const { page = 1, limit = 10, status = "" } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    
+    // Verify Certificate model is available
+    if (!Certificate) {
+      throw new Error("Certificate model not loaded");
+    }
+
+    const filter = {};
+    if (status) {
+      filter.approvalStatus = status;
+    }
+
+    const certificates = await Certificate.find(filter)
+      .populate("user", "name email")
+      .populate("course", "title")
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(parseInt(limit));
+
+    const total = await Certificate.countDocuments(filter);
+
+    res.setHeader('Content-Type', 'application/json');
+    res.status(200).json({
+      success: true,
+      data: certificates,
+      total,
+      pages: Math.ceil(total / parseInt(limit)),
+    });
+  } catch (error) {
+    res.setHeader('Content-Type', 'application/json');
+    res.status(500).json({ 
+      success: false, 
+      message: error.message,
+      errorType: error.name
+    });
+  }
+};
+
+// Delete a certificate
+export const deleteCertificate = async (req, res) => {
+  try {
+    const { certificateId } = req.params;
+
+    const certificate = await Certificate.findByIdAndDelete(certificateId);
+    
+    if (!certificate) {
+      return res.status(404).json({ success: false, message: "Certificate not found" });
+    }
+
+    res.status(200).json({
+      success: true,
+      message: "Certificate deleted successfully",
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
 // Approve a certificate
 export const approveCertificate = async (req, res) => {
   try {

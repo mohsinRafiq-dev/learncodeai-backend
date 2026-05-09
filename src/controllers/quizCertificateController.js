@@ -2,6 +2,7 @@ import Quiz from "../models/Quiz.js";
 import CourseEnrollment from "../models/CourseEnrollment.js";
 import Certificate from "../models/Certificate.js";
 import Course from "../models/Course.js";
+import gamificationService from "../services/gamificationService.js";
 
 // ========== QUIZ SUBMISSION ==========
 
@@ -122,6 +123,15 @@ export const submitQuizAnswers = async (req, res) => {
         sectionProgress.isCompleted = true;
         sectionProgress.completedAt = new Date();
       }
+    } else if (quiz.type === "final-quiz") {
+      enrollment.finalQuizScore = {
+        quizId,
+        score: scorePercentage,
+        maxScore: 100,
+        attemptCount: (enrollment.finalQuizScore?.attemptCount || 0) + 1,
+        lastAttemptAt: new Date(),
+        passed,
+      };
     }
 
     enrollment.lastAccessedAt = new Date();
@@ -153,18 +163,29 @@ export const submitQuizAnswers = async (req, res) => {
         (completedSections / course.sections.length) * 100
       );
 
-      // Check if all sections are completed - if so, issue certificate
-      if (completedSections === course.sections.length && !enrollment.certificateIssued) {
+      // Issue certificate only when course completion criteria are met.
+      const requiresFinalQuiz = !!course.finalQuiz;
+      const finalQuizPassed = enrollment.finalQuizScore?.passed === true;
+      const canIssueCertificate =
+        completedSections === course.sections.length &&
+        (!requiresFinalQuiz || finalQuizPassed);
+
+      if (canIssueCertificate && !enrollment.certificateIssued) {
         enrollment.status = "completed";
         enrollment.completionDate = new Date();
         enrollment.certificateIssued = true;
 
-        // Generate certificate
+        // Use final quiz score when available, otherwise fallback to current score.
+        const certificateScore =
+          enrollment.finalQuizScore?.score !== undefined
+            ? enrollment.finalQuizScore.score
+            : scorePercentage;
+
         const certificate = await generateCertificate(
           userId,
           courseId,
           enrollment._id,
-          scorePercentage
+          certificateScore
         );
 
         enrollment.certificate = certificate._id;
@@ -175,6 +196,31 @@ export const submitQuizAnswers = async (req, res) => {
       throw error;
     }
 
+    // Award gamification points for quiz completion
+    try {
+      // Calculate points based on score (70% passing = base 75 points, bonus for perfect score)
+      let quizPoints = 75; // Base points for completing quiz
+      if (passed) {
+        quizPoints += Math.round((scorePercentage / 100) * 25); // +25 bonus for percentage
+      }
+
+      // Award the points
+      await gamificationService.addPoints(
+        userId,
+        quizPoints,
+        'quiz_completed',
+        quizId
+      );
+
+      // Update streak for quiz completion
+      await gamificationService.updateStreak(userId);
+
+      console.log(`✅ Quiz completion: User ${userId} earned ${quizPoints} points (Score: ${scorePercentage}%)`);
+    } catch (gamificationError) {
+      console.error('⚠️ Error updating gamification for quiz:', gamificationError);
+      // Don't fail the quiz submission due to gamification error
+    }
+
     res.status(200).json({
       success: true,
       message: "Quiz submitted successfully",
@@ -183,7 +229,10 @@ export const submitQuizAnswers = async (req, res) => {
         score: scorePercentage,
         maxScore: 100,
         passed,
-        attemptCount: sectionProgress?.sectionQuizScore?.attemptCount || 1,
+        attemptCount:
+          quiz.type === "final-quiz"
+            ? enrollment.finalQuizScore?.attemptCount || 1
+            : sectionProgress?.sectionQuizScore?.attemptCount || 1,
         results,
         certificate: enrollment.certificate ? enrollment.certificate : null,
       },
@@ -343,7 +392,8 @@ const generateCertificate = async (
       finalScore,
       template: "standard",
       isValid: true,
-      approvalStatus: "pending",
+      approvalStatus: "approved",
+      approvalDate: new Date(),
     });
 
     const savedCertificate = await certificate.save();

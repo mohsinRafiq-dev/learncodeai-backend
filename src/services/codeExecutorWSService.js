@@ -1,5 +1,6 @@
 import WebSocket from 'ws';
 import containerManager from './containerManager.js';
+import fallbackCodeExecutor from './fallbackCodeExecutor.js';
 
 class CodeExecutorWSService {
   constructor() {
@@ -8,6 +9,8 @@ class CodeExecutorWSService {
       javascript: null,
       cpp: null
     };
+    this.dockerAvailable = null; // Cache Docker availability check
+    this.dockerCheckTime = 0;
   }
 
   /**
@@ -52,82 +55,25 @@ class CodeExecutorWSService {
   }
 
   /**
-   * Execute code in a container
+   * Execute code in a container or fallback to simple execution
    */
   async executeCode(code, language, input = '') {
     try {
-      // Ensure container is running
-      const isRunning = await containerManager.isContainerRunning(language);
-      if (!isRunning) {
-        await containerManager.startContainer(language);
+      // Try Docker first (with timeout)
+      const dockerTimeout = 3000; // 3 second timeout for Docker attempt
+      const dockerPromise = this.executeViaDocker(code, language, input);
+      const timeoutPromise = new Promise((resolve, reject) => 
+        setTimeout(() => reject(new Error('Docker timeout')), dockerTimeout)
+      );
+
+      try {
+        // If Docker succeeds within timeout, use it
+        return await Promise.race([dockerPromise, timeoutPromise]);
+      } catch (dockerError) {
+        // Docker failed or timed out, fall back to simple executor
+        console.log(`⚠️  Docker execution failed (${dockerError.message}), using fallback executor`);
+        return await fallbackCodeExecutor.executeCode(code, language, input);
       }
-
-      // Get WebSocket connection
-      const ws = await this.getConnection(language);
-
-      // Send code execution request
-      return new Promise((resolve, reject) => {
-        const timeoutId = setTimeout(() => {
-          reject({
-            output: 'Error: Code execution timed out (30 second limit)',
-            error: true,
-            executionTime: 'Timeout (>30s)'
-          });
-        }, 30000);
-
-        // Handle messages from executor
-        const messageHandler = (data) => {
-          try {
-            const result = JSON.parse(data.toString());
-            
-            clearTimeout(timeoutId);
-            ws.off('message', messageHandler);
-            ws.off('error', errorHandler);
-            
-            // If there's an error, combine output and error fields
-            const outputText = result.status === 'error' 
-              ? (result.error || result.output || 'Unknown error occurred')
-              : (result.output || 'No output');
-            
-            resolve({
-              output: outputText,
-              error: result.status === 'error',
-              executionTime: 'N/A'
-            });
-          } catch (error) {
-            clearTimeout(timeoutId);
-            ws.off('message', messageHandler);
-            ws.off('error', errorHandler);
-            
-            reject({
-              output: `Error parsing response: ${error.message}`,
-              error: true,
-              executionTime: 'Failed'
-            });
-          }
-        };
-
-        const errorHandler = (error) => {
-          clearTimeout(timeoutId);
-          ws.off('message', messageHandler);
-          ws.off('error', errorHandler);
-          
-          reject({
-            output: `WebSocket error: ${error.message}`,
-            error: true,
-            executionTime: 'Failed'
-          });
-        };
-
-        ws.on('message', messageHandler);
-        ws.on('error', errorHandler);
-
-        // Send the code execution request
-        ws.send(JSON.stringify({
-          code,
-          input
-        }));
-      });
 
     } catch (error) {
       return {
@@ -136,6 +82,84 @@ class CodeExecutorWSService {
         executionTime: 'Failed'
       };
     }
+  }
+
+  /**
+   * Execute code via Docker (original implementation)
+   */
+  async executeViaDocker(code, language, input = '') {
+    // Ensure container is running
+    const isRunning = await containerManager.isContainerRunning(language);
+    if (!isRunning) {
+      await containerManager.startContainer(language);
+    }
+
+    // Get WebSocket connection
+    const ws = await this.getConnection(language);
+
+    // Send code execution request
+    return new Promise((resolve, reject) => {
+      const timeoutId = setTimeout(() => {
+        reject({
+          output: 'Error: Code execution timed out (30 second limit)',
+          error: true,
+          executionTime: 'Timeout (>30s)'
+        });
+      }, 30000);
+
+      // Handle messages from executor
+      const messageHandler = (data) => {
+        try {
+          const result = JSON.parse(data.toString());
+          
+          clearTimeout(timeoutId);
+          ws.off('message', messageHandler);
+          ws.off('error', errorHandler);
+          
+          // If there's an error, combine output and error fields
+          const outputText = result.status === 'error' 
+            ? (result.error || result.output || 'Unknown error occurred')
+            : (result.output || 'No output');
+          
+          resolve({
+            output: outputText,
+            error: result.status === 'error',
+            executionTime: 'N/A'
+          });
+        } catch (error) {
+          clearTimeout(timeoutId);
+          ws.off('message', messageHandler);
+          ws.off('error', errorHandler);
+          
+          reject({
+            output: `Error parsing response: ${error.message}`,
+            error: true,
+            executionTime: 'Failed'
+          });
+        }
+      };
+
+      const errorHandler = (error) => {
+        clearTimeout(timeoutId);
+        ws.off('message', messageHandler);
+        ws.off('error', errorHandler);
+        
+        reject({
+          output: `WebSocket error: ${error.message}`,
+          error: true,
+          executionTime: 'Failed'
+        });
+      };
+
+      ws.on('message', messageHandler);
+      ws.on('error', errorHandler);
+
+      // Send the code execution request
+      ws.send(JSON.stringify({
+        code,
+        input
+      }));
+    });
   }
 
   /**

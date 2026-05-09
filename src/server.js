@@ -10,10 +10,25 @@ const server = http.createServer(app);
 // Start containers before starting the server
 async function startServer() {
   try {
-    await containerManager.startAllContainers();
+    // Try to start Docker containers (non-blocking)
+    // If Docker is not available, the fallback executor will be used
+    try {
+      await Promise.race([
+        containerManager.startAllContainers(),
+        new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Docker startup timeout')), 15000)
+        )
+      ]);
+      console.log('✅ Docker containers initialized successfully');
+    } catch (dockerError) {
+      console.warn(`⚠️  Docker initialization failed: ${dockerError.message}`);
+      console.warn('📝 Fallback code executor will be used (Python, JavaScript only)');
+      console.warn('💡 Tip: Install Docker Desktop to enable C++ and persistent container support');
+    }
 
     server.listen(PORT, "0.0.0.0", () => {
       console.log(`🚀 Server running on port ${PORT}`);
+      console.log(`✅ All routes initialized and ready`);
     });
   } catch (error) {
     console.error("Failed to start server:", error);

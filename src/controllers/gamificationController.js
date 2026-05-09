@@ -110,13 +110,12 @@ class GamificationController {
   async getStreak(req, res) {
     try {
       const userId = req.user._id;
-      const streak = await Streak.findOne({ user: userId });
+      let streak = await Streak.findOne({ user: userId });
 
+      // Auto-initialize streak if it doesn't exist
       if (!streak) {
-        return res.status(404).json({
-          success: false,
-          message: "Streak not found",
-        });
+        const { streak: newStreak } = await gamificationService.initializeGamification(userId);
+        streak = newStreak;
       }
 
       res.status(200).json({
@@ -231,6 +230,26 @@ class GamificationController {
       res.status(500).json({
         success: false,
         message: "Error fetching achievements progress",
+        error: error.message,
+      });
+    }
+  }
+
+  // Refresh streak (force update for testing/debugging)
+  async refreshStreak(req, res) {
+    try {
+      const userId = req.user._id;
+      const streak = await gamificationService.updateStreak(userId);
+
+      res.status(200).json({
+        success: true,
+        message: "Streak refreshed successfully",
+        data: streak,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        message: "Error refreshing streak",
         error: error.message,
       });
     }

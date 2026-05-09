@@ -19,6 +19,9 @@ router.get("/streak", auth, gamificationController.getStreak);
 // Update streak
 router.put("/streak/update", auth, gamificationController.updateStreak);
 
+// Force refresh streak (for testing/debugging)
+router.get("/streak/refresh/now", auth, gamificationController.refreshStreak);
+
 // Get user badges
 router.get("/badges", auth, gamificationController.getBadges);
 

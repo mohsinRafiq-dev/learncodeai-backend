@@ -1,4 +1,4 @@
-import seedCourses from "../src/utils/courseSeedData.js";
+import seedCourses from "../src/utils/seedAllLanguageCourses.js";
 import connectDB from "../src/config/database.js";
 
 // Script to seed courses

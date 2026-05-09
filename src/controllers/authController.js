@@ -1,6 +1,7 @@
 import jwt from "jsonwebtoken";
 import User from "../models/User.js";
 import emailService from "../services/emailService.js";
+import gamificationService from "../services/gamificationService.js";
 
 const signToken = (id) => {
   return jwt.sign(
@@ -473,6 +474,13 @@ export const signin = async (req, res) => {
 
     // Update last login
     await user.updateLastLogin();
+      // Count successful sign-in as daily activity for streak tracking
+      try {
+        await gamificationService.updateStreak(user._id);
+      } catch (streakError) {
+        // Do not block sign-in if streak update fails
+        console.error("Streak update on signin failed:", streakError.message);
+      }
 
     createSendToken(user, 200, res);
   } catch (error) {

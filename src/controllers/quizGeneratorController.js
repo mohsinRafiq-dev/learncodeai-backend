@@ -1,6 +1,7 @@
 import geminiService from "../services/geminiService.js";
 import Quiz from "../models/Quiz.js";
 import codeExecutorService from "../services/codeExecutorService.js";
+import gamificationService from "../services/gamificationService.js";
 
 class QuizGeneratorController {
   /**
@@ -284,6 +285,31 @@ class QuizGeneratorController {
           ? Math.round(timeSpent / quiz.questions.length)
           : 0,
       };
+
+      // Award gamification points for practice quiz completion
+      try {
+        // Calculate points based on score
+        let practiceQuizPoints = 50; // Base points for completing practice quiz
+        if (passed) {
+          practiceQuizPoints += Math.round((scorePercentage / 100) * 25); // +25 bonus for percentage
+        }
+
+        // Award the points
+        await gamificationService.addPoints(
+          userId,
+          practiceQuizPoints,
+          'quiz_completed',
+          quizId
+        );
+
+        // Update streak for quiz completion
+        await gamificationService.updateStreak(userId);
+
+        console.log(`✅ Practice quiz completion: User ${userId} earned ${practiceQuizPoints} points (Score: ${scorePercentage}%)`);
+      } catch (gamificationError) {
+        console.error('⚠️ Error updating gamification for practice quiz:', gamificationError);
+        // Don't fail the quiz submission due to gamification error
+      }
 
       res.status(200).json({
         success: true,

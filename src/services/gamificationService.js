@@ -112,8 +112,11 @@ class GamificationService {
 
       // Check for level up
       if (newLevel > previousLevel) {
-        await this.checkAndUnlockBadges(userId, gamification);
+        console.log(`🎉 Level up! User ${userId} reached level ${newLevel}`);
       }
+      
+      // Always check for badge unlocking after points are added
+      await this.checkAndUnlockBadges(userId, gamification);
 
       return gamification;
     } catch (error) {
@@ -122,7 +125,7 @@ class GamificationService {
     }
   }
 
-  // Update streak
+  // Update streak - FIXED & DYNAMIC
   async updateStreak(userId) {
     try {
       let streak = await Streak.findOne({ user: userId });
@@ -132,61 +135,88 @@ class GamificationService {
         streak = newStreak;
       }
 
+      // Get today's date at midnight UTC
       const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      today.setUTCHours(0, 0, 0, 0);
+      const todayTime = today.getTime();
 
-      const lastActivity = streak.lastActivityDate ? new Date(streak.lastActivityDate) : null;
-      if (lastActivity) {
-        lastActivity.setHours(0, 0, 0, 0);
+      // Get last activity date at midnight UTC
+      let lastActivityTime = null;
+      if (streak.lastActivityDate) {
+        const lastDate = new Date(streak.lastActivityDate);
+        lastDate.setUTCHours(0, 0, 0, 0);
+        lastActivityTime = lastDate.getTime();
       }
 
-      // Check if activity is today
-      const todayTime = today.getTime();
-      const lastActivityTime = lastActivity ? lastActivity.getTime() : null;
-
+      // If already active today, return existing streak
       if (lastActivityTime === todayTime) {
-        // Already active today, don't update
+        console.log(`ℹ️  User ${userId} already active today. Streak: ${streak.currentStreak}`);
         return streak;
       }
 
-      // Check if it's consecutive
+      // Calculate yesterday's date at midnight UTC
       const yesterday = new Date(today);
-      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setUTCDate(yesterday.getUTCDate() - 1);
+      const yesterdayTime = yesterday.getTime();
 
-      if (lastActivityTime === yesterday.getTime()) {
-        // Consecutive day, increase streak
+      // Determine streak status
+      if (lastActivityTime === null) {
+        // First activity ever
+        streak.currentStreak = 1;
+        console.log(`✨ Starting new streak for user ${userId}`);
+      } else if (lastActivityTime === yesterdayTime) {
+        // Consecutive day - increase streak
         streak.currentStreak += 1;
-        if (streak.currentStreak > streak.longestStreak) {
-          streak.longestStreak = streak.currentStreak;
-        }
-      } else if (lastActivityTime !== null) {
-        // Streak broken
-        if (streak.currentStreak > 0) {
-          streak.totalStreakDays += streak.currentStreak;
-        }
-        streak.currentStreak = 1;
+        console.log(`🔥 Streak increased! User ${userId}: ${streak.currentStreak} days`);
       } else {
-        // First activity
-        streak.currentStreak = 1;
+        // Fallback: Check absolute time difference to prevent timezone boundary bugs
+        const now = new Date();
+        const absoluteHoursDiff = (now.getTime() - new Date(streak.lastActivityDate).getTime()) / (1000 * 60 * 60);
+        
+        if (absoluteHoursDiff <= 36) {
+           // It has been less than 36 hours, so it's realistically the "next day" for the user regardless of UTC boundaries.
+           streak.currentStreak += 1;
+           console.log(`🔥 Streak increased (Timezone Fallback)! User ${userId}: ${streak.currentStreak} days`);
+        } else {
+           // Streak legitimately broken
+           if (streak.currentStreak > 0) {
+             streak.totalStreakDays += streak.currentStreak;
+             console.log(`💔 Streak broken. Saved ${streak.currentStreak} days. Total: ${streak.totalStreakDays}`);
+           }
+           streak.currentStreak = 1;
+           console.log(`🆕 New streak started for user ${userId}`);
+        }
       }
 
-      streak.lastActivityDate = new Date();
-      streak.streakStartDate = streak.streakStartDate || new Date();
+      // Update longest streak
+      if (streak.currentStreak > streak.longestStreak) {
+        streak.longestStreak = streak.currentStreak;
+        console.log(`🏆 New longest streak! ${streak.longestStreak} days`);
+      }
 
+      // Set activity dates using UTC day boundary to avoid timezone drift
+      streak.lastActivityDate = new Date(todayTime);
+      if (!streak.streakStartDate) {
+        streak.streakStartDate = new Date(todayTime);
+      }
+
+      // Save streak (activity logging handled by points system)
       await streak.save();
 
-      // Check for streak bonuses
+      // Award streak bonuses if milestone reached
       const streakBonuses = Object.keys(POINTS_CONFIG.streakBonus);
       for (const streakDay of streakBonuses) {
         if (streak.currentStreak === parseInt(streakDay)) {
           const bonus = POINTS_CONFIG.streakBonus[streakDay];
+          console.log(`🎁 Streak bonus awarded! ${streak.currentStreak} days = ${bonus} points`);
           await this.addPoints(userId, bonus, "streak_bonus", null);
         }
       }
 
+      console.log(`✅ Streak updated for user ${userId}: Current=${streak.currentStreak}, Best=${streak.longestStreak}`);
       return streak;
     } catch (error) {
-      console.error("Error updating streak:", error);
+      console.error("❌ Error updating streak:", error);
       throw error;
     }
   }
@@ -197,6 +227,10 @@ class GamificationService {
       if (!gamification) {
         gamification = await UserGamification.findOne({ user: userId }).populate("badges");
       }
+
+      // Get user's streak for streak-based badges
+      const streak = await Streak.findOne({ user: userId });
+      const currentStreak = streak?.currentStreak || 0;
 
       const allBadges = await Badge.find();
       const userAchievements = await Achievement.find({ user: userId });
@@ -211,13 +245,22 @@ class GamificationService {
         const requirements = badge.requirements;
         const stats = gamification.statistics;
 
+        // Default requirement values (0 = no requirement)
+        const minPoints = requirements.minPoints || 0;
+        const minCoursesCompleted = requirements.minCoursesCompleted || 0;
+        const minTutorialsCompleted = requirements.minTutorialsCompleted || 0;
+        const minCodeExecutions = requirements.minCodeExecutions || 0;
+        const minQuizzesCompleted = requirements.minQuizzesCompleted || 0;
+        const minStreakDays = requirements.minStreakDays || 0;
+
         // Check if requirements are met
         const meetsRequirements =
-          gamification.totalPoints >= requirements.minPoints &&
-          stats.coursesCompleted >= requirements.minCoursesCompleted &&
-          stats.tutorialsCompleted >= requirements.minTutorialsCompleted &&
-          stats.codeExecutions >= requirements.minCodeExecutions &&
-          stats.quizzesCompleted >= requirements.minQuizzesCompleted;
+          gamification.totalPoints >= minPoints &&
+          stats.coursesCompleted >= minCoursesCompleted &&
+          stats.tutorialsCompleted >= minTutorialsCompleted &&
+          stats.codeExecutions >= minCodeExecutions &&
+          stats.quizzesCompleted >= minQuizzesCompleted &&
+          currentStreak >= minStreakDays;
 
         if (meetsRequirements) {
           // Unlock badge
@@ -243,6 +286,7 @@ class GamificationService {
               reason: "badge_earned",
               relatedId: badge._id,
             });
+            console.log(`🎖️  Badge "${badge.name}" unlocked for user ${userId}! +${badge.points} bonus points`);
           }
         }
       }

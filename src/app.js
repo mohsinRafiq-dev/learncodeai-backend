@@ -26,6 +26,7 @@ import newsletterRoutes from "./routes/newsletterRoutes.js";
 import practiceQuizRoutes from "./routes/practiceQuizRoutes.js";
 import discussionRoutes from "./routes/discussionRoutes.js";
 import gamificationRoutes from "./routes/gamificationRoutes.js";
+import progressTrackingRoutes from "./routes/progressTrackingRoutes.js";
 import connectDB from "./config/database.js";
 import passport, { initializeOAuthStrategies } from "./config/oauthConfig.js";
 import emailService from "./services/emailService.js";
@@ -115,6 +116,8 @@ app.use("/api/discussions", discussionRoutes);
 console.log("✅ Discussion forum routes registered at /api/discussions");
 app.use("/api/gamification", gamificationRoutes);
 console.log("✅ Gamification routes registered at /api/gamification");
+app.use("/api/progress", progressTrackingRoutes);
+console.log("✅ Progress tracking routes registered at /api/progress");
 
 // Initialize default badges on startup
 gamificationService.initializeBadges();

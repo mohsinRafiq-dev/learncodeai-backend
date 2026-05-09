@@ -453,10 +453,48 @@ export const completeLessonProgress = async (req, res) => {
 
     const overallProgress = Math.round((completedLessons / totalLessons) * 100);
 
+    const updateData = { overallProgress };
+    
+    let newlyCompleted = false;
+    if (overallProgress >= 100 && updatedEnrollment.status !== 'completed') {
+      updateData.status = 'completed';
+      updateData.completedAt = new Date();
+      newlyCompleted = true;
+    }
+
     await CourseEnrollment.updateOne(
       { user: userId, course: courseId },
-      { $set: { overallProgress } }
+      { $set: updateData }
     );
+
+    if (newlyCompleted) {
+      try {
+        const Certificate = (await import('../models/Certificate.js')).default;
+        
+        const existingCert = await Certificate.findOne({ user: userId, course: courseId });
+        if (!existingCert) {
+          const cert = new Certificate({
+            user: userId,
+            course: courseId,
+            enrollment: updatedEnrollment._id,
+            certificateNumber: `CERT-${Date.now()}-${userId.toString().slice(-6)}`,
+            finalScore: 100,
+            template: 'standard',
+            isValid: true,
+            approvalStatus: 'approved',
+            approvalDate: new Date()
+          });
+          await cert.save();
+          
+          await CourseEnrollment.updateOne(
+            { _id: updatedEnrollment._id },
+            { $set: { certificateIssued: true, certificate: cert._id } }
+          );
+        }
+      } catch (certError) {
+        console.error("Error generating certificate on course completion:", certError);
+      }
+    }
 
     // Return updated enrollment
     const finalEnrollment = await CourseEnrollment.findOne({

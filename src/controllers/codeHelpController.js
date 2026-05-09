@@ -257,6 +257,109 @@ Feel free to describe what you're working on, and I'll guide you through it!`
       });
     }
   }
+
+  async getCodeOptimization(req, res) {
+    try {
+      const { code, language } = req.body;
+      
+      if (!code) {
+        return res.status(400).json({
+          success: false,
+          message: 'Code is required for optimization analysis'
+        });
+      }
+
+      // Build a teaching-focused prompt for code optimization
+      const systemPrompt = `You are a code optimization expert helping a developer improve their code.
+
+IMPORTANT - PROVIDE ACTIONABLE OPTIMIZATION SUGGESTIONS:
+- Analyze the code for performance improvements
+- Identify code smells and anti-patterns
+- Suggest better algorithms or data structures where applicable
+- Recommend readability and maintainability improvements
+- Point out potential memory leaks or resource issues
+- Suggest modern language features that could simplify the code
+- Be specific with line references and before/after examples
+- Use markdown formatting (##, ###, -, **bold**, \`code\`)
+- Rate the current code quality on a scale of 1-10
+- Be encouraging while being thorough
+
+Code to optimize (${language}):
+\`\`\`${language}
+${code}
+\`\`\``;
+
+      const userPrompt = `Analyze this ${language} code and provide detailed optimization suggestions. Include:
+1. **Code Quality Score** (1-10)
+2. **Performance Optimizations** - specific improvements for speed/memory
+3. **Best Practices** - modern patterns and conventions
+4. **Readability Improvements** - naming, structure, comments
+5. **Security Concerns** - if any
+6. **Refactored Example** - show the optimized version of the most critical section`;
+
+      const prompt = `${systemPrompt}\n\n${userPrompt}\n\nProvide a comprehensive but structured analysis using markdown formatting.`;
+
+      const response = await geminiService.callGemini(prompt);
+      let suggestions = geminiService.extractText(response);
+
+      if (!suggestions || suggestions.trim() === '') {
+        suggestions = `## Code Optimization Analysis
+
+### Code Quality Score: N/A
+I couldn't fully analyze the code at this time, but here are general optimization tips:
+
+### General Optimization Tips:
+- **Use meaningful variable names** that describe their purpose
+- **Avoid nested loops** where possible — consider using hash maps
+- **Cache repeated calculations** instead of recalculating
+- **Use built-in functions** — they're usually optimized in ${language}
+- **Remove unused variables** and dead code
+- **Add error handling** for edge cases
+
+### Best Practices:
+- Follow ${language} naming conventions
+- Keep functions small and focused (single responsibility)
+- Add comments for complex logic
+- Use constants instead of magic numbers
+
+Try submitting your code again for a detailed analysis!`;
+      }
+
+      res.status(200).json({
+        success: true,
+        data: {
+          suggestions
+        }
+      });
+    } catch (error) {
+      console.error('Error in code optimization:', error);
+      console.error('Error stack:', error.stack);
+      
+      // Provide fallback optimization guidance
+      res.status(200).json({
+        success: true,
+        data: {
+          suggestions: `## Quick Optimization Tips
+
+I'm having trouble reaching my AI service, but here are common optimizations:
+
+### Performance:
+- **Reduce loop complexity** — avoid O(n²) where O(n) is possible
+- **Use appropriate data structures** — Sets for lookups, Maps for key-value
+- **Minimize DOM operations** — batch updates when possible
+- **Avoid memory leaks** — clean up event listeners and timers
+
+### Readability:
+- Use descriptive variable and function names
+- Break large functions into smaller ones
+- Add JSDoc comments for public functions
+- Use consistent formatting
+
+Try again in a moment for a full AI-powered analysis!`
+        }
+      });
+    }
+  }
 }
 
 export default new CodeHelpController();
