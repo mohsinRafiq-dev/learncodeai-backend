@@ -10,20 +10,24 @@ const server = http.createServer(app);
 // Start containers before starting the server
 async function startServer() {
   try {
-    // Try to start Docker containers (non-blocking)
-    // If Docker is not available, the fallback executor will be used
-    try {
-      await Promise.race([
-        containerManager.startAllContainers(),
-        new Promise((_, reject) => 
-          setTimeout(() => reject(new Error('Docker startup timeout')), 15000)
-        )
-      ]);
-      console.log('✅ Docker containers initialized successfully');
-    } catch (dockerError) {
-      console.warn(`⚠️  Docker initialization failed: ${dockerError.message}`);
-      console.warn('📝 Fallback code executor will be used (Python, JavaScript only)');
-      console.warn('💡 Tip: Install Docker Desktop to enable C++ and persistent container support');
+    const execBackend = (process.env.CODE_EXEC_BACKEND || 'docker').toLowerCase();
+
+    if (execBackend === 'docker') {
+      // Local dev: try to start Docker containers (non-blocking)
+      try {
+        await Promise.race([
+          containerManager.startAllContainers(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('Docker startup timeout')), 15000)
+          )
+        ]);
+        console.log('✅ Docker containers initialized successfully');
+      } catch (dockerError) {
+        console.warn(`⚠️  Docker initialization failed: ${dockerError.message}`);
+        console.warn('📝 Fallback code executor will be used (Python, JavaScript only)');
+      }
+    } else {
+      console.log(`⚙️  Code execution backend: ${execBackend} (skipping Docker init)`);
     }
 
     server.listen(PORT, "0.0.0.0", () => {

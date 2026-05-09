@@ -1,6 +1,10 @@
 import WebSocket from 'ws';
 import containerManager from './containerManager.js';
 import fallbackCodeExecutor from './fallbackCodeExecutor.js';
+import pistonCodeExecutor from './pistonCodeExecutor.js';
+
+// CODE_EXEC_BACKEND: "docker" (default) | "piston" | "fallback"
+const BACKEND = (process.env.CODE_EXEC_BACKEND || 'docker').toLowerCase();
 
 class CodeExecutorWSService {
   constructor() {
@@ -58,21 +62,32 @@ class CodeExecutorWSService {
    * Execute code in a container or fallback to simple execution
    */
   async executeCode(code, language, input = '') {
+    // Production / non-Docker hosts: route to Piston or in-process fallback
+    if (BACKEND === 'piston') {
+      return pistonCodeExecutor.executeCode(code, language, input);
+    }
+    if (BACKEND === 'fallback') {
+      return fallbackCodeExecutor.executeCode(code, language, input);
+    }
+
     try {
       // Try Docker first (with timeout)
       const dockerTimeout = 3000; // 3 second timeout for Docker attempt
       const dockerPromise = this.executeViaDocker(code, language, input);
-      const timeoutPromise = new Promise((resolve, reject) => 
+      const timeoutPromise = new Promise((resolve, reject) =>
         setTimeout(() => reject(new Error('Docker timeout')), dockerTimeout)
       );
 
       try {
-        // If Docker succeeds within timeout, use it
         return await Promise.race([dockerPromise, timeoutPromise]);
       } catch (dockerError) {
-        // Docker failed or timed out, fall back to simple executor
-        console.log(`⚠️  Docker execution failed (${dockerError.message}), using fallback executor`);
-        return await fallbackCodeExecutor.executeCode(code, language, input);
+        console.log(`⚠️  Docker execution failed (${dockerError.message}), trying Piston`);
+        // Final fallback chain: Piston → in-process fallback
+        try {
+          return await pistonCodeExecutor.executeCode(code, language, input);
+        } catch {
+          return await fallbackCodeExecutor.executeCode(code, language, input);
+        }
       }
 
     } catch (error) {

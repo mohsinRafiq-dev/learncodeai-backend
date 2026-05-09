@@ -57,16 +57,33 @@ if (Array.isArray(logger)) {
   app.use(logger);
 }
 
+// Build allowed origins from env (comma-separated FRONTEND_URLS) + sane local defaults.
+const allowedOrigins = [
+  ...(process.env.FRONTEND_URLS || process.env.FRONTEND_URL || "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "http://localhost:5175",
+];
+
 app.use(
   cors({
-    origin: [
-      process.env.FRONTEND_URL || "http://localhost:5173",
-      "http://localhost:5174",
-      "http://localhost:5175",
-    ],
+    origin: (origin, cb) => {
+      // Allow same-origin / curl / server-to-server (no Origin header)
+      if (!origin) return cb(null, true);
+      if (allowedOrigins.includes(origin)) return cb(null, true);
+      // Allow any *.vercel.app preview deploy by default
+      if (/^https:\/\/[a-z0-9-]+\.vercel\.app$/i.test(origin)) return cb(null, true);
+      return cb(new Error(`CORS: origin ${origin} not allowed`));
+    },
     credentials: true,
   })
 );
+
+// Trust Railway/Heroku-style reverse proxies so req.ip + secure cookies work
+app.set("trust proxy", 1);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
@@ -76,6 +93,14 @@ app.use(cookieParser());
 app.use("/uploads", express.static("uploads"));
 
 // Session configuration for OAuth
+const isProd = process.env.NODE_ENV === "production";
+if (isProd && (!process.env.SESSION_SECRET || process.env.SESSION_SECRET.length < 16)) {
+  console.warn("⚠️  SESSION_SECRET is missing or weak — set a strong value in production env.");
+}
+if (isProd && !process.env.JWT_SECRET) {
+  console.warn("⚠️  JWT_SECRET is missing — auth tokens will not work safely in production.");
+}
+
 app.use(
   session({
     secret:
@@ -84,8 +109,9 @@ app.use(
     resave: false,
     saveUninitialized: false,
     cookie: {
-      secure: process.env.NODE_ENV === "production",
-      maxAge: 24 * 60 * 60 * 1000, // 24 hours
+      secure: isProd,
+      sameSite: isProd ? "none" : "lax", // cross-site (Vercel → Railway) needs none + secure
+      maxAge: 24 * 60 * 60 * 1000,
     },
   })
 );
@@ -96,6 +122,11 @@ app.use(passport.session());
 
 app.get("/", (req, res) => {
   res.send("LearnCode AI Backend API 🚀");
+});
+
+// Health check (used by Railway/uptime monitors). Cheap and skips DB.
+app.get("/healthz", (req, res) => {
+  res.status(200).json({ status: "ok", uptime: process.uptime() });
 });
 
 // Maintenance gate (auth/admin paths bypass internally)
