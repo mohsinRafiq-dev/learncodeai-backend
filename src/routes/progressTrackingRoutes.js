@@ -10,6 +10,9 @@ router.get("/dashboard", auth, progressTrackingController.getDashboard);
 // Get performance analytics (strengths/weaknesses)
 router.get("/analytics", auth, progressTrackingController.getPerformanceAnalytics);
 
+// Skill radar (per-language scores)
+router.get("/skill-radar", auth, progressTrackingController.getSkillRadar);
+
 // Export progress report (JSON or CSV)
 router.get("/export", auth, progressTrackingController.exportProgressReport);
 

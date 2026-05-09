@@ -27,6 +27,13 @@ import {
   getNewsletterSubscriptions,
   getAllCertificates,
   deleteCertificate,
+  getContentVersions,
+  restoreContentVersion,
+  getPlatformSettings,
+  updatePlatformSettings,
+  getAuditLogs,
+  getFunnel,
+  diffContentVersions,
 } from "../controllers/adminController.js";
 
 const router = express.Router();
@@ -74,6 +81,21 @@ router.delete("/certificates/:certificateId", deleteCertificate);
 
 // Newsletter Management
 router.get("/newsletter-subscriptions", getNewsletterSubscriptions);
+
+// Content Version History
+router.get("/versions/diff", diffContentVersions);
+router.get("/versions/:contentType/:contentId", getContentVersions);
+router.post("/versions/:versionId/restore", restoreContentVersion);
+
+// Platform Settings
+router.get("/settings", getPlatformSettings);
+router.put("/settings", updatePlatformSettings);
+
+// Audit Log
+router.get("/audit-logs", getAuditLogs);
+
+// Funnel analytics
+router.get("/analytics/funnel", getFunnel);
 
 export default router;
 

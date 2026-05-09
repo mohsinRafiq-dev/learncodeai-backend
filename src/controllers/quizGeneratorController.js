@@ -2,6 +2,8 @@ import geminiService from "../services/geminiService.js";
 import Quiz from "../models/Quiz.js";
 import codeExecutorService from "../services/codeExecutorService.js";
 import gamificationService from "../services/gamificationService.js";
+import QuizSubmission from "../models/QuizSubmission.js";
+import { findHighestSimilarity } from "../utils/codeSimilarity.js";
 
 class QuizGeneratorController {
   /**
@@ -311,6 +313,82 @@ class QuizGeneratorController {
         // Don't fail the quiz submission due to gamification error
       }
 
+      // Plagiarism check on coding answers + persistent submission record
+      const codingAnswers = [];
+      for (const r of results) {
+        if (r.type !== "coding" || !r.userAnswer) continue;
+        const prior = await QuizSubmission.aggregate([
+          { $match: { quiz: quiz._id, user: { $ne: userId } } },
+          { $unwind: "$codingAnswers" },
+          { $match: { "codingAnswers.questionId": r.questionId } },
+          { $sort: { createdAt: -1 } },
+          { $limit: 50 },
+          {
+            $project: {
+              _id: "$codingAnswers._id",
+              user: "$user",
+              code: "$codingAnswers.code",
+            },
+          },
+        ]);
+        const sim = findHighestSimilarity(r.userAnswer, prior);
+        codingAnswers.push({
+          questionId: r.questionId,
+          code: r.userAnswer,
+          passed: r.isCorrect,
+          similarityScore: Math.round(sim.score * 100) / 100,
+          similarityFlagged: sim.flagged,
+          matchedSubmission: sim.submissionId,
+        });
+        r.similarity = {
+          score: Math.round(sim.score * 100) / 100,
+          flagged: sim.flagged,
+        };
+      }
+
+      try {
+        await QuizSubmission.create({
+          user: userId,
+          quiz: quiz._id,
+          score: scorePercentage,
+          passed,
+          timeSpent: timeSpent || 0,
+          codingAnswers,
+        });
+      } catch (e) {
+        console.warn("QuizSubmission save failed:", e.message);
+      }
+
+      // Adaptive difficulty hint
+      const adaptiveSuggestion = (() => {
+        if (scorePercentage >= 90) {
+          return {
+            nextDifficulty:
+              quiz.difficulty === "beginner"
+                ? "intermediate"
+                : quiz.difficulty === "intermediate"
+                ? "advanced"
+                : "advanced",
+            message: "Great job! Try a harder quiz next.",
+          };
+        }
+        if (scorePercentage < 50) {
+          return {
+            nextDifficulty:
+              quiz.difficulty === "advanced"
+                ? "intermediate"
+                : quiz.difficulty === "intermediate"
+                ? "beginner"
+                : "beginner",
+            message: "Drop down a level to build confidence.",
+          };
+        }
+        return {
+          nextDifficulty: quiz.difficulty,
+          message: "Keep practising at this level.",
+        };
+      })();
+
       res.status(200).json({
         success: true,
         message: passed ? "Congratulations! You passed!" : "Keep practicing!",
@@ -320,6 +398,7 @@ class QuizGeneratorController {
           results,
           performanceMetrics,
           quizTitle: quiz.title,
+          adaptiveSuggestion,
         },
       });
     } catch (error) {

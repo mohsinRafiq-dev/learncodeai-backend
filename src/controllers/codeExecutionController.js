@@ -1,5 +1,15 @@
 import codeExecutorWSService from '../services/codeExecutorWSService.js';
 import gamificationService from '../services/gamificationService.js';
+import ErrorLog from '../models/ErrorLog.js';
+
+const classifyError = (message = '', language = '') => {
+  const m = message.toLowerCase();
+  if (m.includes('timeout') || m.includes('timed out')) return 'timeout';
+  if (m.includes('syntaxerror') || m.includes('syntax error') || m.includes('parse error')) return 'syntax';
+  if (language === 'cpp' && (m.includes('compile') || m.includes('error:'))) return 'compilation';
+  if (m.includes('error') || m.includes('exception') || m.includes('traceback')) return 'runtime';
+  return 'other';
+};
 
 class CodeExecutionController {
   async executeCode(req, res) {
@@ -16,6 +26,22 @@ class CodeExecutionController {
 
       // Execute code
       const result = await codeExecutorWSService.executeCode(code, language, input);
+
+      // Log execution errors for analytics
+      const errorText = result?.error || result?.stderr || '';
+      if (errorText) {
+        const { courseId, lessonId, tutorialId } = req.body || {};
+        ErrorLog.create({
+          user: userId || null,
+          language: language.toLowerCase(),
+          errorType: classifyError(errorText, language),
+          errorMessage: String(errorText).slice(0, 1000),
+          snippet: String(code || '').slice(0, 500),
+          courseId: courseId || null,
+          lessonId: lessonId || null,
+          tutorialId: tutorialId || null,
+        }).catch((e) => console.warn('ErrorLog save failed:', e.message));
+      }
 
       // Award points for successful execution
       if (userId && result && !result.error) {

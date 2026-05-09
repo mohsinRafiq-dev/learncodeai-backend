@@ -1,6 +1,54 @@
 import geminiService from '../services/geminiService.js';
+import AIFeedback from '../models/AIFeedback.js';
 
 class CodeHelpController {
+  async submitFeedback(req, res) {
+    try {
+      const { feature, helpful, promptHash, note, metadata } = req.body;
+      if (!feature || typeof helpful !== 'boolean') {
+        return res.status(400).json({ success: false, message: 'feature and helpful are required' });
+      }
+      const fb = await AIFeedback.create({
+        user: req.user._id,
+        feature,
+        helpful,
+        promptHash: promptHash || '',
+        note: note || '',
+        metadata: metadata || {},
+      });
+      res.status(201).json({ success: true, data: fb });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  async getFeedbackStats(req, res) {
+    try {
+      const stats = await AIFeedback.aggregate([
+        {
+          $group: {
+            _id: { feature: '$feature', helpful: '$helpful' },
+            count: { $sum: 1 },
+          },
+        },
+      ]);
+      const summary = {};
+      for (const row of stats) {
+        const f = row._id.feature;
+        if (!summary[f]) summary[f] = { helpful: 0, notHelpful: 0, helpfulRate: 0 };
+        if (row._id.helpful) summary[f].helpful = row.count;
+        else summary[f].notHelpful = row.count;
+      }
+      Object.keys(summary).forEach((f) => {
+        const total = summary[f].helpful + summary[f].notHelpful;
+        summary[f].helpfulRate = total ? Math.round((summary[f].helpful / total) * 100) : 0;
+      });
+      res.status(200).json({ success: true, data: summary });
+    } catch (error) {
+      res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
   async getErrorExplanation(req, res) {
     try {
       const { error, code, language } = req.body;

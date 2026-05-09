@@ -376,6 +376,48 @@ class TutorialController {
 
       // If AI-generated, use OpenAI to generate real content
       if (isAIgenerated) {
+        // Check cache first — if another user already generated the same
+        // (concept, language, difficulty), reuse the AI content to save API cost
+        try {
+          const cacheKey = {
+            concept: new RegExp(`^${concept}$`, "i"),
+            language: language.toLowerCase(),
+            difficulty: difficulty || "beginner",
+            isAIgenerated: true,
+          };
+          const cached = await Tutorial.findOne(cacheKey)
+            .sort({ createdAt: -1 })
+            .lean();
+          if (cached && cached.content) {
+            console.log(`♻️  Reusing cached AI tutorial for ${concept}/${language}`);
+            tutorialData = {
+              ...tutorialData,
+              title: cached.title,
+              description: cached.description,
+              content: cached.content,
+              codeExamples: cached.codeExamples || [],
+              notes: cached.notes || [],
+              tips: cached.tips || [],
+            };
+            // Skip the Gemini call
+            const tutorial = new Tutorial({
+              ...tutorialData,
+              createdBy: userId,
+              isPreGenerated: false,
+              isAIgenerated: true,
+            });
+            await tutorial.save();
+            return res.status(201).json({
+              success: true,
+              message: "Tutorial created (from AI cache)",
+              data: tutorial,
+              cached: true,
+            });
+          }
+        } catch (cacheErr) {
+          console.warn("Tutorial cache lookup failed:", cacheErr.message);
+        }
+
         // --- GEMINI AI GENERATION (default) ---
         try {
           console.log(`Generating AI tutorial for: ${concept} in ${language} (Gemini)`);

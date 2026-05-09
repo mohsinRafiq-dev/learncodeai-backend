@@ -27,7 +27,7 @@ const userSchema = new mongoose.Schema(
       required: function () {
         return !this.googleId && !this.githubId;
       },
-      minlength: [6, "Password must be at least 6 characters long"],
+      minlength: [8, "Password must be at least 8 characters long"],
       validate: {
         validator: function (password) {
           if (!password || this.googleId || this.githubId) return true;
@@ -111,6 +111,16 @@ const userSchema = new mongoose.Schema(
     // Preferences
     preferences: {
       emailNotifications: { type: Boolean, default: true },
+      editor: {
+        keybindings: {
+          type: String,
+          enum: ["default", "vim", "emacs"],
+          default: "default",
+        },
+        fontSize: { type: Number, default: 14, min: 10, max: 24 },
+        theme: { type: String, default: "vs-dark" },
+        autosave: { type: Boolean, default: true },
+      },
     },
 
     // Linked data

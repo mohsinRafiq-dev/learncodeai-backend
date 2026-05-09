@@ -252,5 +252,36 @@ discussionSchema.pre("save", function (next) {
   next();
 });
 
+// Auto-flag posts that contain profanity / harassment / injection patterns.
+// We attach a synthetic "system" report so admins see them in the existing reports queue.
+discussionSchema.pre("save", async function (next) {
+  if (!this.isNew && !this.isModified("content") && !this.isModified("title")) return next();
+  try {
+    const { moderateText } = await import("../utils/contentModeration.js");
+    const combined = `${this.title || ""}\n${this.content || ""}`;
+    const result = moderateText(combined);
+    if (!result.clean) {
+      const alreadyFlagged = (this.reports || []).some(
+        (r) => r.reason === "inappropriate" && r.description?.startsWith("[auto-flag]")
+      );
+      if (!alreadyFlagged) {
+        this.reports = this.reports || [];
+        this.reports.push({
+          reporter: this.author,
+          reason: "inappropriate",
+          description: `[auto-flag] ${result.flags.join(", ")} (severity: ${result.severity})`,
+        });
+        if (result.severity === "high") {
+          this.isHidden = true;
+          this.hiddenReason = `Auto-hidden: ${result.flags.join(", ")}`;
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("Discussion moderation failed:", e.message);
+  }
+  next();
+});
+
 const Discussion = mongoose.model("Discussion", discussionSchema);
 export default Discussion;

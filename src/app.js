@@ -27,10 +27,14 @@ import practiceQuizRoutes from "./routes/practiceQuizRoutes.js";
 import discussionRoutes from "./routes/discussionRoutes.js";
 import gamificationRoutes from "./routes/gamificationRoutes.js";
 import progressTrackingRoutes from "./routes/progressTrackingRoutes.js";
+import dailyChallengeRoutes from "./routes/dailyChallengeRoutes.js";
+import codeDraftRoutes from "./routes/codeDraftRoutes.js";
 import connectDB from "./config/database.js";
 import passport, { initializeOAuthStrategies } from "./config/oauthConfig.js";
 import emailService from "./services/emailService.js";
 import gamificationService from "./services/gamificationService.js";
+import { maintenanceMode } from "./middleware/maintenanceMode.js";
+import { startScheduledPublishService } from "./services/scheduledPublishService.js";
 
 // Connect to MongoDB
 connectDB();
@@ -94,6 +98,9 @@ app.get("/", (req, res) => {
   res.send("LearnCode AI Backend API 🚀");
 });
 
+// Maintenance gate (auth/admin paths bypass internally)
+app.use("/api", maintenanceMode);
+
 // Routes
 app.use("/api/auth", authRoutes);
 app.use("/api/code", codeExecutionRoutes);
@@ -118,9 +125,16 @@ app.use("/api/gamification", gamificationRoutes);
 console.log("✅ Gamification routes registered at /api/gamification");
 app.use("/api/progress", progressTrackingRoutes);
 console.log("✅ Progress tracking routes registered at /api/progress");
+app.use("/api/daily-challenge", dailyChallengeRoutes);
+console.log("✅ Daily challenge routes registered at /api/daily-challenge");
+app.use("/api/drafts", codeDraftRoutes);
+console.log("✅ Code drafts routes registered at /api/drafts");
 
 // Initialize default badges on startup
 gamificationService.initializeBadges();
+
+// Start scheduled publish runner (auto-publishes content when publishAt arrives)
+startScheduledPublishService();
 
 // 404 handler
 app.use((req, res) => {

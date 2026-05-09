@@ -569,6 +569,98 @@ class ProgressTrackingController {
       });
     }
   }
+
+  // GET /api/progress/skill-radar — per-language skill scores for radar chart
+  async getSkillRadar(req, res) {
+    try {
+      const userId = req.user._id;
+      const enrollments = await CourseEnrollment.find({ user: userId }).populate({
+        path: "course",
+        select: "language",
+      });
+
+      const tutorialProgress = await Progress.find({ user: userId }).lean();
+
+      const dimensions = ["python", "javascript", "cpp"];
+      const radar = dimensions.map((lang) => ({
+        language: lang,
+        // Components scored 0-100, then averaged
+        coursesScore: 0,
+        quizScore: 0,
+        practiceScore: 0,
+        completionScore: 0,
+        overall: 0,
+      }));
+
+      const byLang = Object.fromEntries(radar.map((r) => [r.language, r]));
+
+      let maxTimeAnyLang = 1;
+      const timeByLang = { python: 0, javascript: 0, cpp: 0 };
+
+      for (const e of enrollments) {
+        const lang = e.course?.language;
+        if (!lang || !byLang[lang]) continue;
+        timeByLang[lang] += e.totalTimeSpentMinutes || 0;
+        if (timeByLang[lang] > maxTimeAnyLang) maxTimeAnyLang = timeByLang[lang];
+
+        // Quiz score average
+        const scores = (e.sectionProgress || [])
+          .map((sp) => sp.sectionQuizScore?.score)
+          .filter((s) => typeof s === "number");
+        if (scores.length) {
+          const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+          byLang[lang].quizScore =
+            byLang[lang].quizScore === 0
+              ? avg
+              : (byLang[lang].quizScore + avg) / 2;
+        }
+
+        // Course completion (use overallProgress 0-100)
+        if (typeof e.overallProgress === "number") {
+          byLang[lang].completionScore = Math.max(
+            byLang[lang].completionScore,
+            e.overallProgress
+          );
+        }
+
+        byLang[lang].coursesScore = Math.min(
+          100,
+          (byLang[lang].coursesScore || 0) + 25
+        );
+      }
+
+      // Practice score from tutorial progress
+      for (const p of tutorialProgress) {
+        const lang = p.language;
+        if (!lang || !byLang[lang]) continue;
+        const v = (p.completionPercentage || p.completion || 0) | 0;
+        byLang[lang].practiceScore = Math.max(byLang[lang].practiceScore, v);
+      }
+
+      // Normalise time-spent into completionScore boost
+      for (const r of radar) {
+        const timeBonus = Math.round(
+          (timeByLang[r.language] / maxTimeAnyLang) * 20
+        );
+        r.completionScore = Math.min(100, r.completionScore + timeBonus);
+        r.overall = Math.round(
+          (r.coursesScore * 0.25 +
+            r.quizScore * 0.35 +
+            r.practiceScore * 0.2 +
+            r.completionScore * 0.2)
+        );
+      }
+
+      res.status(200).json({ success: true, data: radar });
+    } catch (error) {
+      console.error("Skill radar error:", error);
+      res.status(500).json({
+        success: false,
+        message: "Failed to compute skill radar",
+        error: error.message,
+      });
+    }
+  }
 }
 
 export default new ProgressTrackingController();

@@ -76,6 +76,12 @@ const tutorialSchema = new mongoose.Schema(
       type: Boolean,
       default: false
     },
+
+    // Scheduled publishing — content auto-publishes when publishAt <= now
+    publishAt: {
+      type: Date,
+      default: null,
+    },
     
     // Metadata
     tags: [String],

@@ -6,6 +6,11 @@ import Course from "../models/Course.js";
 import CourseEnrollment from "../models/CourseEnrollment.js";
 import Certificate from "../models/Certificate.js";
 import NewsletterSubscription from "../models/NewsletterSubscription.js";
+import ErrorLog from "../models/ErrorLog.js";
+import ContentVersion from "../models/ContentVersion.js";
+import PlatformSettings from "../models/PlatformSettings.js";
+import AuditLog from "../models/AuditLog.js";
+import { invalidateMaintenanceCache } from "../middleware/maintenanceMode.js";
 
 // Get dashboard statistics
 export const getDashboardStats = async (req, res) => {
@@ -164,6 +169,8 @@ export const updateUserStatus = async (req, res) => {
     // Send notification email
     await notifyUserStatusChange(user, accountStatus, reason);
 
+    AuditLog.record(req, 'user_status_changed', 'User', user._id, { accountStatus, reason });
+
     res.status(200).json({
       success: true,
       message: `User status updated to ${accountStatus}`,
@@ -205,6 +212,8 @@ export const changeUserRole = async (req, res) => {
       return res.status(404).json({ success: false, message: "User not found" });
     }
 
+    AuditLog.record(req, 'user_role_changed', 'User', user._id, { role });
+
     res.status(200).json({
       success: true,
       message: `User role changed to ${role}`,
@@ -233,6 +242,8 @@ export const deleteUser = async (req, res) => {
     if (!user) {
       return res.status(404).json({ success: false, message: "User not found" });
     }
+
+    AuditLog.record(req, 'user_deleted', 'User', user._id, { email: user.email });
 
     res.status(200).json({
       success: true,
@@ -424,6 +435,14 @@ export const updateTutorial = async (req, res) => {
   try {
     const { tutorialId } = req.params;
     const updateData = req.body;
+    const changeNote = req.body.__changeNote || "";
+    delete updateData.__changeNote;
+
+    // Snapshot the existing content before update
+    const existing = await Tutorial.findById(tutorialId).lean();
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Tutorial not found" });
+    }
 
     const tutorial = await Tutorial.findByIdAndUpdate(
       tutorialId,
@@ -431,9 +450,14 @@ export const updateTutorial = async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    if (!tutorial) {
-      return res.status(404).json({ success: false, message: "Tutorial not found" });
-    }
+    // Persist version history (best-effort; don't fail update if this errors)
+    ContentVersion.recordVersion({
+      contentType: "tutorial",
+      contentId: tutorialId,
+      snapshot: existing,
+      changedBy: req.user?._id || null,
+      changeNote,
+    }).catch((e) => console.warn("Tutorial version save failed:", e.message));
 
     res.status(200).json({
       success: true,
@@ -496,39 +520,228 @@ export const createTutorial = async (req, res) => {
 };
 
 // Get analytics data
+// Simple in-memory cache for the analytics endpoint
+const analyticsCache = new Map();
+const ANALYTICS_TTL_MS = 5 * 60 * 1000;
+
 export const getAnalytics = async (req, res) => {
   try {
-    // Total code executions
-    const totalExecutions = await Progress.countDocuments();
+    const days = Math.min(parseInt(req.query.days) || 30, 365);
+    const cacheKey = `analytics:${days}`;
+    const cached = analyticsCache.get(cacheKey);
+    if (cached && Date.now() - cached.at < ANALYTICS_TTL_MS) {
+      return res.status(200).json({ success: true, cached: true, data: cached.data });
+    }
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
-    // Most used languages
-    const languageStats = await Progress.aggregate([
+    // Top-line KPIs
+    const [
+      totalUsers,
+      activeUsers,
+      newSignups,
+      totalCourses,
+      totalTutorials,
+      publishedTutorials,
+      totalChats,
+      totalEnrollments,
+      totalCertificates,
+      totalErrors,
+    ] = await Promise.all([
+      User.countDocuments(),
+      User.countDocuments({ accountStatus: "active" }),
+      User.countDocuments({ createdAt: { $gte: since } }),
+      Course.countDocuments(),
+      Tutorial.countDocuments(),
+      Tutorial.countDocuments({ isPublished: true }),
+      AIChat.countDocuments({ createdAt: { $gte: since } }),
+      CourseEnrollment.countDocuments(),
+      Certificate.countDocuments(),
+      ErrorLog.countDocuments({ occurredAt: { $gte: since } }),
+    ]);
+
+    // User signup trend (per day)
+    const userTrend = await User.aggregate([
+      { $match: { createdAt: { $gte: since } } },
       {
         $group: {
-          _id: "$language",
+          _id: {
+            $dateToString: { format: "%Y-%m-%d", date: "$createdAt" },
+          },
           count: { $sum: 1 },
         },
       },
+      { $sort: { _id: 1 } },
+    ]);
+
+    // Most used languages (from progress + errors)
+    const languageStats = await Progress.aggregate([
+      { $group: { _id: "$language", count: { $sum: 1 } } },
       { $sort: { count: -1 } },
       { $limit: 5 },
     ]);
 
-    // AI Chat usage
-    const totalChats = await AIChat.countDocuments();
+    // Error frequency stats
+    const [errorsByType, errorsByLanguage, errorTrend] = await Promise.all([
+      ErrorLog.aggregate([
+        { $match: { occurredAt: { $gte: since } } },
+        { $group: { _id: "$errorType", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ]),
+      ErrorLog.aggregate([
+        { $match: { occurredAt: { $gte: since } } },
+        { $group: { _id: "$language", count: { $sum: 1 } } },
+        { $sort: { count: -1 } },
+      ]),
+      ErrorLog.aggregate([
+        { $match: { occurredAt: { $gte: since } } },
+        {
+          $group: {
+            _id: {
+              $dateToString: { format: "%Y-%m-%d", date: "$occurredAt" },
+            },
+            count: { $sum: 1 },
+          },
+        },
+        { $sort: { _id: 1 } },
+      ]),
+    ]);
 
-    // User progress summary
-    const totalProgress = await Progress.countDocuments();
-
-    res.status(200).json({
-      success: true,
-      data: {
-        totalExecutions,
-        languageStats,
-        totalChats,
-        totalProgress,
+    // AI chat category breakdown (by context)
+    const chatCategories = await AIChat.aggregate([
+      { $match: { createdAt: { $gte: since } } },
+      {
+        $group: {
+          _id: { $ifNull: ["$context", "general"] },
+          count: { $sum: 1 },
+        },
       },
-    });
+      { $sort: { count: -1 } },
+    ]);
+
+    // Top performing courses (by enrollments + average completion)
+    const topCourses = await CourseEnrollment.aggregate([
+      {
+        $group: {
+          _id: "$course",
+          enrollments: { $sum: 1 },
+          avgProgress: { $avg: "$overallProgress" },
+          avgTimeMinutes: { $avg: "$totalTimeSpentMinutes" },
+        },
+      },
+      { $sort: { enrollments: -1 } },
+      { $limit: 10 },
+      {
+        $lookup: {
+          from: "courses",
+          localField: "_id",
+          foreignField: "_id",
+          as: "course",
+        },
+      },
+      { $unwind: "$course" },
+      {
+        $project: {
+          _id: 1,
+          name: "$course.title",
+          category: "$course.language",
+          views: "$enrollments",
+          completion: { $round: [{ $ifNull: ["$avgProgress", 0] }, 0] },
+          avgTime: { $round: [{ $ifNull: ["$avgTimeMinutes", 0] }, 0] },
+        },
+      },
+    ]);
+
+    // Engagement summary
+    const totalTimeSpent = await CourseEnrollment.aggregate([
+      {
+        $group: {
+          _id: null,
+          minutes: { $sum: "$totalTimeSpentMinutes" },
+        },
+      },
+    ]);
+
+    const payload = {
+      rangeDays: days,
+      totals: {
+        totalUsers,
+        activeUsers,
+        newSignups,
+        totalCourses,
+        totalTutorials,
+        publishedTutorials,
+        totalChats,
+        totalEnrollments,
+        totalCertificates,
+        totalErrors,
+        totalEngagementMinutes: totalTimeSpent[0]?.minutes || 0,
+      },
+      userTrend,
+      languageStats,
+      errors: {
+        byType: errorsByType,
+        byLanguage: errorsByLanguage,
+        trend: errorTrend,
+      },
+      chatCategories,
+      topCourses,
+    };
+
+    analyticsCache.set(cacheKey, { at: Date.now(), data: payload });
+    res.status(200).json({ success: true, cached: false, data: payload });
   } catch (error) {
+    console.error("Analytics error:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Funnel: signup → first lesson → first quiz → first certificate
+export const getFunnel = async (req, res) => {
+  try {
+    const days = Math.min(parseInt(req.query.days) || 30, 365);
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+    const signups = await User.countDocuments({ createdAt: { $gte: since } });
+
+    const firstEnrollments = await CourseEnrollment.distinct("user", {
+      enrolledAt: { $gte: since },
+    });
+    const enrolledCount = firstEnrollments.length;
+
+    // Users with at least one completed lesson
+    const lessonStarted = await CourseEnrollment.countDocuments({
+      enrolledAt: { $gte: since },
+      "sectionProgress.0": { $exists: true },
+    });
+
+    // Users who completed at least one quiz attempt (score field set)
+    const quizUsers = await CourseEnrollment.distinct("user", {
+      enrolledAt: { $gte: since },
+      "sectionProgress.score": { $gte: 0 },
+    });
+
+    // Users who earned at least one certificate
+    const certifiedUsers = await Certificate.distinct("user", {
+      createdAt: { $gte: since },
+    });
+
+    const funnel = [
+      { step: "Signed Up", count: signups },
+      { step: "Enrolled", count: enrolledCount },
+      { step: "Started Lesson", count: lessonStarted },
+      { step: "Took Quiz", count: quizUsers.length },
+      { step: "Earned Certificate", count: certifiedUsers.length },
+    ];
+
+    // Compute conversion rates relative to top of funnel
+    const top = funnel[0].count || 1;
+    funnel.forEach((s) => {
+      s.conversionRate = Math.round((s.count / top) * 100);
+    });
+
+    res.status(200).json({ success: true, data: { rangeDays: days, funnel } });
+  } catch (error) {
+    console.error("Funnel error:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
@@ -910,6 +1123,13 @@ export const updateCourse = async (req, res) => {
   try {
     const { courseId } = req.params;
     const updateData = req.body;
+    const changeNote = req.body.__changeNote || "";
+    delete updateData.__changeNote;
+
+    const existing = await Course.findById(courseId).lean();
+    if (!existing) {
+      return res.status(404).json({ success: false, message: "Course not found" });
+    }
 
     const course = await Course.findByIdAndUpdate(
       courseId,
@@ -917,14 +1137,156 @@ export const updateCourse = async (req, res) => {
       { new: true, runValidators: true }
     );
 
-    if (!course) {
-      return res.status(404).json({ success: false, message: "Course not found" });
-    }
+    ContentVersion.recordVersion({
+      contentType: "course",
+      contentId: courseId,
+      snapshot: existing,
+      changedBy: req.user?._id || null,
+      changeNote,
+    }).catch((e) => console.warn("Course version save failed:", e.message));
 
     res.status(200).json({
       success: true,
       message: "Course updated successfully",
       data: course,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Compute a simple line-level diff between two strings
+function lineDiff(a = "", b = "") {
+  const aLines = String(a).split("\n");
+  const bLines = String(b).split("\n");
+  const out = [];
+  // Greedy LCS-ish: walk together, mark mismatches
+  const max = Math.max(aLines.length, bLines.length);
+  for (let i = 0; i < max; i++) {
+    if (aLines[i] === bLines[i]) {
+      out.push({ type: "ctx", line: aLines[i] ?? "" });
+    } else {
+      if (aLines[i] !== undefined) out.push({ type: "del", line: aLines[i] });
+      if (bLines[i] !== undefined) out.push({ type: "add", line: bLines[i] });
+    }
+  }
+  return out;
+}
+
+function diffObjects(a = {}, b = {}) {
+  const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+  const result = {};
+  for (const k of keys) {
+    const av = a?.[k];
+    const bv = b?.[k];
+    if (typeof av === "string" && typeof bv === "string" && (av.includes("\n") || bv.includes("\n"))) {
+      const lines = lineDiff(av, bv);
+      if (lines.some((l) => l.type !== "ctx")) result[k] = { kind: "text", lines };
+    } else if (JSON.stringify(av) !== JSON.stringify(bv)) {
+      result[k] = { kind: "value", before: av, after: bv };
+    }
+  }
+  return result;
+}
+
+// GET /api/admin/versions/diff?versionAId=...&versionBId=...
+export const diffContentVersions = async (req, res) => {
+  try {
+    const ContentVersion = (await import("../models/ContentVersion.js")).default;
+    const { versionAId, versionBId } = req.query;
+    if (!versionAId || !versionBId) {
+      return res.status(400).json({ success: false, message: "versionAId and versionBId are required" });
+    }
+    const [a, b] = await Promise.all([
+      ContentVersion.findById(versionAId).lean(),
+      ContentVersion.findById(versionBId).lean(),
+    ]);
+    if (!a || !b) {
+      return res.status(404).json({ success: false, message: "Version not found" });
+    }
+    if (a.contentType !== b.contentType || String(a.contentId) !== String(b.contentId)) {
+      return res.status(400).json({ success: false, message: "Versions belong to different content" });
+    }
+    const changes = diffObjects(a.snapshot, b.snapshot);
+    res.status(200).json({
+      success: true,
+      data: {
+        contentType: a.contentType,
+        contentId: a.contentId,
+        from: { id: a._id, version: a.versionNumber, at: a.createdAt },
+        to: { id: b._id, version: b.versionNumber, at: b.createdAt },
+        changes,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// ============== CONTENT VERSION HISTORY ==============
+export const getContentVersions = async (req, res) => {
+  try {
+    const { contentType, contentId } = req.params;
+    if (!["tutorial", "course", "lesson"].includes(contentType)) {
+      return res.status(400).json({ success: false, message: "Invalid content type" });
+    }
+
+    const versions = await ContentVersion.find({ contentType, contentId })
+      .sort({ versionNumber: -1 })
+      .populate("changedBy", "name email")
+      .lean();
+
+    res.status(200).json({ success: true, data: versions });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const restoreContentVersion = async (req, res) => {
+  try {
+    const { versionId } = req.params;
+    const version = await ContentVersion.findById(versionId).lean();
+    if (!version) {
+      return res.status(404).json({ success: false, message: "Version not found" });
+    }
+
+    let Model;
+    if (version.contentType === "tutorial") Model = Tutorial;
+    else if (version.contentType === "course") Model = Course;
+    else {
+      return res.status(400).json({ success: false, message: "Restore not supported for this content type" });
+    }
+
+    const current = await Model.findById(version.contentId).lean();
+    if (!current) {
+      return res.status(404).json({ success: false, message: "Content no longer exists" });
+    }
+
+    // Snapshot current before restoring
+    await ContentVersion.recordVersion({
+      contentType: version.contentType,
+      contentId: version.contentId,
+      snapshot: current,
+      changedBy: req.user?._id || null,
+      changeNote: `Pre-restore snapshot (restoring v${version.versionNumber})`,
+    });
+
+    // Strip immutable fields
+    const restorePayload = { ...version.snapshot };
+    delete restorePayload._id;
+    delete restorePayload.createdAt;
+    delete restorePayload.updatedAt;
+
+    const restored = await Model.findByIdAndUpdate(
+      version.contentId,
+      restorePayload,
+      { new: true, runValidators: false }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: `Restored to version ${version.versionNumber}`,
+      data: restored,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -988,6 +1350,80 @@ export const getNewsletterSubscriptions = async (req, res) => {
       success: false, 
       message: "Failed to fetch newsletter subscriptions" 
     });
+  }
+};
+
+
+
+// ============== PLATFORM SETTINGS ==============
+export const getPlatformSettings = async (req, res) => {
+  try {
+    const settings = await PlatformSettings.getSettings();
+    res.status(200).json({ success: true, data: settings });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+export const updatePlatformSettings = async (req, res) => {
+  try {
+    const settings = await PlatformSettings.getSettings();
+    const allowed = [
+      'siteName', 'defaultTheme', 'primaryColor', 'accentColor', 'logoUrl',
+      'features', 'maintenance', 'update', 'execution',
+    ];
+    allowed.forEach((key) => {
+      if (req.body[key] !== undefined) {
+        if (typeof req.body[key] === 'object' && !Array.isArray(req.body[key])) {
+          settings[key] = { ...(settings[key]?.toObject?.() || settings[key]), ...req.body[key] };
+        } else {
+          settings[key] = req.body[key];
+        }
+      }
+    });
+    settings.updatedBy = req.user?._id || null;
+    await settings.save();
+    invalidateMaintenanceCache();
+    AuditLog.record(req, 'platform_settings_updated', 'PlatformSettings', settings._id, {
+      keys: Object.keys(req.body || {}),
+    });
+    res.status(200).json({ success: true, message: 'Settings updated', data: settings });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
+
+// Audit log viewer
+export const getAuditLogs = async (req, res) => {
+  try {
+    const { page = 1, limit = 50, action = '', actor = '' } = req.query;
+    const filter = {};
+    if (action) filter.action = action;
+    if (actor) filter.actor = actor;
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+    const [logs, total] = await Promise.all([
+      AuditLog.find(filter)
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(parseInt(limit))
+        .populate('actor', 'name email')
+        .lean(),
+      AuditLog.countDocuments(filter),
+    ]);
+
+    res.status(200).json({
+      success: true,
+      data: logs,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        pages: Math.ceil(total / parseInt(limit)),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 

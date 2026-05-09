@@ -110,6 +110,10 @@ const courseSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    publishAt: {
+      type: Date,
+      default: null,
+    },
     isArchived: {
       type: Boolean,
       default: false,

@@ -6,6 +6,19 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Optional QR generation — uses `qrcode` if installed, otherwise gracefully degrades
+let qrcodeModule = null;
+async function tryLoadQRCode() {
+  if (qrcodeModule !== null) return qrcodeModule;
+  try {
+    const mod = await import("qrcode");
+    qrcodeModule = mod.default || mod;
+  } catch {
+    qrcodeModule = false;
+  }
+  return qrcodeModule;
+}
+
 class CertificatePdfService {
   /**
    * Generate a professional certificate PDF
@@ -19,16 +32,35 @@ class CertificatePdfService {
    * @returns {Promise<Buffer>} PDF buffer
    */
   static async generateCertificate(certificateData) {
+    // Pre-generate QR data URL if `qrcode` is installed
+    const verifyBase = process.env.FRONTEND_URL || "http://localhost:5173";
+    const verifyUrl = `${verifyBase}/verify/certificate?id=${encodeURIComponent(
+      certificateData.certificateNumber || ""
+    )}`;
+    let qrDataUrl = null;
+    try {
+      const QRCode = await tryLoadQRCode();
+      if (QRCode) {
+        qrDataUrl = await QRCode.toDataURL(verifyUrl, {
+          margin: 1,
+          width: 120,
+          color: { dark: "#1a3a52", light: "#ffffff" },
+        });
+      }
+    } catch (e) {
+      console.warn("QR generation failed, falling back to text:", e.message);
+    }
+
     return new Promise((resolve, reject) => {
       try {
-        const { 
-          user, 
-          course, 
-          certificateNumber, 
-          finalScore, 
+        const {
+          user,
+          course,
+          certificateNumber,
+          finalScore,
           averageScore,
           quizzesAttempted,
-          issuedDate 
+          issuedDate
         } = certificateData;
 
         // Create PDF document in landscape orientation
@@ -263,6 +295,49 @@ class CertificatePdfService {
           width: sigLineLength,
           align: "center",
         });
+
+        // ===== VERIFY QR / URL =====
+        const qrSize = 70;
+        const qrX = pageWidth - qrSize - 50;
+        const qrY = pageHeight - qrSize - 60;
+
+        if (qrDataUrl) {
+          try {
+            const base64 = qrDataUrl.split(",")[1];
+            const imgBuffer = Buffer.from(base64, "base64");
+            doc.image(imgBuffer, qrX, qrY, { width: qrSize, height: qrSize });
+            doc
+              .fillColor("#666666")
+              .fontSize(7)
+              .font("Helvetica")
+              .text("Scan to verify", qrX, qrY + qrSize + 2, {
+                width: qrSize,
+                align: "center",
+              });
+          } catch (e) {
+            console.warn("Failed to embed QR image:", e.message);
+          }
+        } else {
+          // Fallback: bordered box with verify URL
+          doc
+            .strokeColor("#d4af37")
+            .lineWidth(1)
+            .rect(qrX, qrY, qrSize, qrSize)
+            .stroke();
+          doc
+            .fillColor("#666666")
+            .fontSize(6)
+            .font("Helvetica")
+            .text("Verify at:", qrX + 4, qrY + 8, { width: qrSize - 8 });
+          doc
+            .fillColor("#1a3a52")
+            .fontSize(6)
+            .font("Helvetica-Bold")
+            .text(verifyUrl, qrX + 4, qrY + 22, {
+              width: qrSize - 8,
+              ellipsis: true,
+            });
+        }
 
         // ===== FOOTER =====
         doc
