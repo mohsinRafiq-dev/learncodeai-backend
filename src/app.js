@@ -29,6 +29,7 @@ import gamificationRoutes from "./routes/gamificationRoutes.js";
 import progressTrackingRoutes from "./routes/progressTrackingRoutes.js";
 import dailyChallengeRoutes from "./routes/dailyChallengeRoutes.js";
 import codeDraftRoutes from "./routes/codeDraftRoutes.js";
+import recommendationRoutes from "./routes/recommendationRoutes.js";
 import connectDB from "./config/database.js";
 import passport, { initializeOAuthStrategies } from "./config/oauthConfig.js";
 import emailService from "./services/emailService.js";
@@ -160,6 +161,8 @@ app.use("/api/daily-challenge", dailyChallengeRoutes);
 console.log("✅ Daily challenge routes registered at /api/daily-challenge");
 app.use("/api/drafts", codeDraftRoutes);
 console.log("✅ Code drafts routes registered at /api/drafts");
+app.use("/api/recommendations", recommendationRoutes);
+console.log("✅ Recommendation routes registered at /api/recommendations");
 
 // Initialize default badges on startup
 gamificationService.initializeBadges();
