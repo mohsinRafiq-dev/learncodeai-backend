@@ -19,6 +19,7 @@
     "test:functional": "cross-env NODE_ENV=test NODE_OPTIONS='--experimental-vm-modules' jest tests/functional",
     "seed:courses": "node scripts/seedCourses.js",
     "seed:certificates": "node scripts/seedCertificates.js",
+    "seed:challenges": "node scripts/seedDailyChallenges.js",
     "docker:secure": "docker-compose -f docker-compose.secure.yml up -d",
     "docker:fallback": "docker-compose -f docker-compose.fallback.yml up -d",
     "docker:security-check": "powershell -ExecutionPolicy Bypass -File scripts/windows/docker-network-fix.ps1",
