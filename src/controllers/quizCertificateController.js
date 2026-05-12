@@ -3,6 +3,7 @@ import CourseEnrollment from "../models/CourseEnrollment.js";
 import Certificate from "../models/Certificate.js";
 import Course from "../models/Course.js";
 import gamificationService from "../services/gamificationService.js";
+import codeExecutorWSService from "../services/codeExecutorWSService.js";
 
 // ========== QUIZ SUBMISSION ==========
 
@@ -68,10 +69,32 @@ export const submitQuizAnswers = async (req, res) => {
           break;
 
         case "coding":
-          // In a real scenario, this would execute the code and test against test cases
-          // For now, we'll mark it as pending review
-          isCorrect = false; // TODO: Implement code execution
-          explanation = "Coding answer submitted for review by instructor";
+          if (question.codingProblem?.testCases?.length > 0 && userAnswer) {
+            const lang = question.codingProblem.language || quiz.language || "python";
+            let allPassed = true;
+            for (const tc of question.codingProblem.testCases) {
+              try {
+                const result = await codeExecutorWSService.executeCode(
+                  userAnswer,
+                  lang,
+                  tc.input || ""
+                );
+                const actual = (result?.output || result?.stdout || "").trim();
+                const expected = (tc.expectedOutput || "").trim();
+                if (actual !== expected) { allPassed = false; break; }
+              } catch {
+                allPassed = false;
+                break;
+              }
+            }
+            isCorrect = allPassed;
+            explanation = allPassed
+              ? question.explanation || "All test cases passed!"
+              : "One or more test cases failed.";
+          } else {
+            isCorrect = false;
+            explanation = "Coding answer submitted for review by instructor";
+          }
           break;
       }
 
