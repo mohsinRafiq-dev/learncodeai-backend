@@ -31,6 +31,7 @@
     "security:scan": "powershell -ExecutionPolicy Bypass -File scripts/windows/docker-security-enhanced.ps1"
   },
   "dependencies": {
+    "@sentry/node": "^10.53.1",
     "bcryptjs": "^3.0.2",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.5",

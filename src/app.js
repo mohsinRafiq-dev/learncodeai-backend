@@ -4,6 +4,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import express from "express";
+import { initSentry, sentryErrorHandler } from "./config/sentry.js";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import session from "express-session";
@@ -48,6 +49,9 @@ console.log("OAuth strategies initialized:", oauthStrategies);
 emailService.initialize();
 
 const app = express();
+
+// Sentry must be initialized before any other middleware
+initSentry(app);
 
 const environment = process.env.NODE_ENV || "development";
 const logger = loggerConfig[environment];
@@ -170,6 +174,9 @@ gamificationService.initializeBadges();
 // Start scheduled publish runner (auto-publishes content when publishAt arrives)
 startScheduledPublishService();
 
+// Sentry error handler — must be before all other error middleware
+app.use(sentryErrorHandler());
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
@@ -179,7 +186,7 @@ app.use((req, res) => {
 });
 
 // Global error handler
-app.use((err, req, res) => {
+app.use((err, req, res, next) => {
   console.error("Error:", err);
   res.status(err.status || 500).json({
     status: "error",
