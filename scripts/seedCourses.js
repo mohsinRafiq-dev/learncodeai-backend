@@ -1,16 +1,25 @@
-import seedCourses from "../src/utils/seedAllLanguageCourses.js";
-import connectDB from "../src/config/database.js";
+// Seed the 3 comprehensive courses (Python, JavaScript, C++).
+// Idempotent — wipes existing courses with matching title first.
+//
+//   node scripts/seedCourses.js
 
-// Script to seed courses
-const runSeed = async () => {
+import dotenv from "dotenv";
+import mongoose from "mongoose";
+import seedAllCourses from "../src/utils/seedAllCourses.js";
+
+dotenv.config();
+
+const run = async () => {
   try {
-    // Connect to database
-    await connectDB();
-    console.log("📡 Connected to database");
-    
-    // Run seeding
-    await seedCourses();
-    console.log("✨ Seeding completed successfully!");
+    const uri =
+      process.env.MONGODB_URI || "mongodb://localhost:27017/learncode-ai";
+    await mongoose.connect(uri);
+    console.log("📡 Connected to MongoDB");
+
+    await seedAllCourses();
+
+    await mongoose.connection.close();
+    console.log("✨ Seeding complete!");
     process.exit(0);
   } catch (error) {
     console.error("❌ Seeding failed:", error);
@@ -18,5 +27,4 @@ const runSeed = async () => {
   }
 };
 
-runSeed();
-
+run();
