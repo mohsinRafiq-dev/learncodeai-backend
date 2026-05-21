@@ -29,28 +29,56 @@ const tutorialSchema = new mongoose.Schema(
       required: true 
     },
     
-    // Programming language
-    language: { 
-      type: String, 
-      enum: ["python", "cpp", "javascript"],
+    // Programming language — aligned with Course model
+    language: {
+      type: String,
+      enum: ["python", "cpp", "javascript", "sql", "rust", "haskell"],
       default: "python",
       lowercase: true
     },
-    
+
     // Concept name (e.g., "Variables", "Functions", "Loops")
     concept: {
       type: String,
       required: true,
       trim: true
     },
-    
+
+    // Module groups tutorials into a higher-level unit
+    // e.g., "Foundations", "Data Structures", "Advanced Python"
+    module: {
+      type: String,
+      trim: true,
+      default: null,
+    },
+
+    // Sequence within (language, module, difficulty)
+    // Lower = earlier. Lets the UI show "Next/Previous tutorial".
+    order: {
+      type: Number,
+      default: 0,
+      index: true,
+    },
+
+    // Prerequisites — tutorials a learner should finish first
+    prerequisites: [{
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "Tutorial",
+    }],
+
+    // Estimated minutes to complete (drives total path duration UI)
+    estimatedMinutes: {
+      type: Number,
+      default: 15,
+    },
+
     // Difficulty level
     difficulty: {
       type: String,
       enum: ["beginner", "intermediate", "advanced"],
       default: "beginner",
     },
-    
+
     // Code examples for this tutorial
     codeExamples: [codeExampleSchema],
     
@@ -108,6 +136,7 @@ const tutorialSchema = new mongoose.Schema(
 // Indexes for efficient querying
 tutorialSchema.index({ language: 1, concept: 1 });
 tutorialSchema.index({ language: 1, difficulty: 1 });
+tutorialSchema.index({ language: 1, module: 1, order: 1 });
 tutorialSchema.index({ createdBy: 1 });
 tutorialSchema.index({ isPreGenerated: 1 });
 
