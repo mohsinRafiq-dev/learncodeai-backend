@@ -4,6 +4,7 @@ import Feedback from '../models/Feedback.js';
 import openaiService from '../services/openaiService.js';
 import geminiService from '../services/geminiService.js';
 import gamificationService from '../services/gamificationService.js';
+import { userAccess } from '../middleware/tierMiddleware.js';
 
 class TutorialController {
   // Get all pre-generated tutorials, optionally filtered by language
