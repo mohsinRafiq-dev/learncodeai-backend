@@ -2,6 +2,7 @@ import express from "express";
 import courseController from "../controllers/courseController.js";
 import quizCertificateController from "../controllers/quizCertificateController.js";
 import auth from "../middleware/authMiddleware.js";
+import { requireProOrLifetime } from "../middleware/tierMiddleware.js";
 
 const router = express.Router();
 
@@ -29,17 +30,21 @@ router.put(
   courseController.completeLessonProgress
 );
 
-// ========== QUIZ ROUTES (For enrolled users) ==========
+// ========== QUIZ ROUTES (Pro / Lifetime only) ==========
+// Quizzes are part of the paid experience — required for certificates.
 router.get(
   "/quizzes/:quizId",
   auth,
+  requireProOrLifetime,
   quizCertificateController.getQuizDetails
 );
 router.post(
   "/quizzes/:quizId/submit",
   auth,
+  requireProOrLifetime,
   quizCertificateController.submitQuizAnswers
 );
+// Leaderboard remains visible to logged-in users (social proof).
 router.get(
   "/quizzes/:quizId/leaderboard",
   auth,
