@@ -31,6 +31,8 @@ import progressTrackingRoutes from "./routes/progressTrackingRoutes.js";
 import dailyChallengeRoutes from "./routes/dailyChallengeRoutes.js";
 import codeDraftRoutes from "./routes/codeDraftRoutes.js";
 import recommendationRoutes from "./routes/recommendationRoutes.js";
+import billingRoutes from "./routes/billingRoutes.js";
+import billingController from "./controllers/billingController.js";
 import connectDB from "./config/database.js";
 import passport, { initializeOAuthStrategies } from "./config/oauthConfig.js";
 import emailService from "./services/emailService.js";
@@ -89,6 +91,14 @@ app.use(
 
 // Trust Railway/Heroku-style reverse proxies so req.ip + secure cookies work
 app.set("trust proxy", 1);
+
+// Stripe webhook MUST receive the raw body to verify the signature.
+// Mount this BEFORE the global JSON parser.
+app.post(
+  "/api/billing/webhook",
+  express.raw({ type: "application/json" }),
+  billingController.handleWebhook
+);
 
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true, limit: "10mb" }));
@@ -167,6 +177,8 @@ app.use("/api/drafts", codeDraftRoutes);
 console.log("✅ Code drafts routes registered at /api/drafts");
 app.use("/api/recommendations", recommendationRoutes);
 console.log("✅ Recommendation routes registered at /api/recommendations");
+app.use("/api/billing", billingRoutes);
+console.log("✅ Billing routes registered at /api/billing");
 
 // Initialize default badges on startup
 gamificationService.initializeBadges();

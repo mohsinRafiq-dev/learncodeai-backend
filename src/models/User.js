@@ -51,6 +51,48 @@ const userSchema = new mongoose.Schema(
     lastLogin: { type: Date, default: null },
     profilePicture: { type: String, default: null },
 
+    // ---------- Billing / subscription ----------
+    // `free`     — default; can read foundations tutorials, limited AI
+    // `pro`      — active recurring subscription (monthly or yearly)
+    // `lifetime` — paid one-time Lifetime Pro; never expires
+    subscriptionTier: {
+      type: String,
+      enum: ["free", "pro", "lifetime"],
+      default: "free",
+      index: true,
+    },
+    // For `pro`: the date the current billing period ends (renewal due then).
+    // For `lifetime` / `free`: null.
+    subscriptionExpiresAt: { type: Date, default: null },
+    // Latest Stripe subscription status, mirrored from webhook events.
+    subscriptionStatus: {
+      type: String,
+      enum: [
+        "active",
+        "trialing",
+        "past_due",
+        "canceled",
+        "incomplete",
+        "incomplete_expired",
+        "unpaid",
+        "paused",
+        null,
+      ],
+      default: null,
+    },
+    // Stripe identifiers, used to create portal sessions / reconcile webhooks.
+    stripeCustomerId: { type: String, default: null, index: true },
+    stripeSubscriptionId: { type: String, default: null },
+    // Course IDs the user bought individually ($19 single-course purchase).
+    // Grants access to one specific course even on the free tier.
+    purchasedCourses: [
+      { type: mongoose.Schema.Types.ObjectId, ref: "Course" },
+    ],
+    // Daily AI prompt count + last reset day (UTC), used to rate-limit
+    // free tier (5/day) and apply soft cap on Pro (500/day) for cost control.
+    aiPromptsUsedToday: { type: Number, default: 0 },
+    aiPromptsResetAt: { type: Date, default: null },
+
     // Profile Information
     dateOfBirth: { type: Date, default: null },
     bio: {
