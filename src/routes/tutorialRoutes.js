@@ -1,6 +1,6 @@
 import express from 'express';
 import tutorialController from '../controllers/tutorialController.js';
-import auth from '../middleware/authMiddleware.js';
+import auth, { optionalAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -9,7 +9,8 @@ router.get('/', tutorialController.getAllTutorials);
 router.get('/languages', tutorialController.getLanguages);
 router.get('/language/:language', tutorialController.getTutorialsByLanguage);
 router.get('/concepts/:language', tutorialController.getConceptsByLanguage);
-router.get('/:id', tutorialController.getTutorialById);
+// optionalAuth so the controller can check req.user.subscriptionTier for gating
+router.get('/:id', optionalAuth, tutorialController.getTutorialById);
 
 // Protected routes - save/manage tutorials
 router.post('/save', auth, tutorialController.saveTutorial);

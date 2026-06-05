@@ -51,17 +51,49 @@ class TutorialController {
   async getTutorialById(req, res) {
     try {
       const { id } = req.params;
-      
+
       const tutorial = await Tutorial.findById(id)
         .populate('feedbacks', 'rating comment');
-      
+
       if (!tutorial) {
         return res.status(404).json({
           success: false,
           message: 'Tutorial not found'
         });
       }
-      
+
+      // Gating: free users only get full body for beginner tutorials.
+      // For intermediate/advanced, return metadata + isLocked so the frontend
+      // can render a "Pro only — upgrade" overlay above a preview.
+      const access = userAccess(req.user);
+      const isBeginner = (tutorial.difficulty || '').toLowerCase() === 'beginner';
+      const hasFullAccess = access.isPro || access.isLifetime || isBeginner;
+
+      if (!hasFullAccess) {
+        const obj = tutorial.toObject();
+        return res.status(200).json({
+          success: true,
+          data: {
+            _id: obj._id,
+            title: obj.title,
+            description: obj.description,
+            language: obj.language,
+            concept: obj.concept,
+            module: obj.module,
+            order: obj.order,
+            difficulty: obj.difficulty,
+            estimatedMinutes: obj.estimatedMinutes,
+            tags: obj.tags,
+            content: null,
+            codeExamples: [],
+            notes: [],
+            tips: [],
+            isLocked: true,
+            lockReason: 'PRO_REQUIRED',
+          },
+        });
+      }
+
       res.status(200).json({
         success: true,
         data: tutorial
