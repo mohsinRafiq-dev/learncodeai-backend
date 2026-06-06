@@ -4,6 +4,7 @@ import CourseLesson from "../models/CourseLesson.js";
 import Quiz from "../models/Quiz.js";
 import Certificate from "../models/Certificate.js";
 import CourseEnrollment from "../models/CourseEnrollment.js";
+import ContentVersion from "../models/ContentVersion.js";
 
 // ========== COURSE MANAGEMENT ==========
 
@@ -478,11 +479,25 @@ export const updateLesson = async (req, res) => {
       "resources",
     ];
 
+    // Snapshot the lesson BEFORE applying the update so version history shows
+    // "what the lesson looked like before this change". Mirror the tutorial /
+    // course versioning pattern already used in adminController.
+    const before = lesson.toObject();
+
     allowedUpdates.forEach((field) => {
       if (updates[field] !== undefined) lesson[field] = updates[field];
     });
 
     await lesson.save();
+
+    // Best-effort version record — don't fail the update if this fails.
+    ContentVersion.recordVersion({
+      contentType: "lesson",
+      contentId: lesson._id,
+      snapshot: before,
+      changedBy: req.user?._id || null,
+      changeNote: updates.__changeNote || "",
+    }).catch((e) => console.warn("Lesson version save failed:", e.message));
 
     res.status(200).json({
       success: true,

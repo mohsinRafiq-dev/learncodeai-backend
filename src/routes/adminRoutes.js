@@ -35,6 +35,7 @@ import {
   getFunnel,
   diffContentVersions,
 } from "../controllers/adminController.js";
+import adminChallengeController from "../controllers/adminChallengeController.js";
 
 const router = express.Router();
 
@@ -86,6 +87,13 @@ router.get("/newsletter-subscriptions", getNewsletterSubscriptions);
 router.get("/versions/diff", diffContentVersions);
 router.get("/versions/:contentType/:contentId", getContentVersions);
 router.post("/versions/:versionId/restore", restoreContentVersion);
+
+// Daily Coding Challenges (admin CRUD)
+router.get("/challenges", adminChallengeController.listChallenges);
+router.post("/challenges", adminChallengeController.createChallenge);
+router.get("/challenges/:id", adminChallengeController.getChallenge);
+router.put("/challenges/:id", adminChallengeController.updateChallenge);
+router.delete("/challenges/:id", adminChallengeController.deleteChallenge);
 
 // Platform Settings
 router.get("/settings", getPlatformSettings);
