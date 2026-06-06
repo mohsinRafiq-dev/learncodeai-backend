@@ -1,6 +1,23 @@
 import codeExecutorWSService from '../services/codeExecutorWSService.js';
 import gamificationService from '../services/gamificationService.js';
 import ErrorLog from '../models/ErrorLog.js';
+import { invalidateAnalyticsCache } from './adminController.js';
+
+// Fire-and-forget helper used by both the success-path (captured stderr) and
+// the catch-path (executor itself crashed). Busts the admin analytics cache so
+// the chart reflects the new entry on the next page-load instead of waiting
+// for the 5-min TTL.
+const recordError = (payload) => {
+  ErrorLog.create(payload)
+    .then(() => {
+      try {
+        invalidateAnalyticsCache();
+      } catch (_) {
+        // best-effort — fine if the cache module isn't ready yet
+      }
+    })
+    .catch((e) => console.warn('ErrorLog save failed:', e.message));
+};
 
 const classifyError = (message = '', language = '') => {
   const m = message.toLowerCase();
@@ -27,11 +44,11 @@ class CodeExecutionController {
       // Execute code
       const result = await codeExecutorWSService.executeCode(code, language, input);
 
-      // Log execution errors for analytics
+      // Log execution errors for analytics (captured stderr / runtime error)
       const errorText = result?.error || result?.stderr || '';
       if (errorText) {
         const { courseId, lessonId, tutorialId } = req.body || {};
-        ErrorLog.create({
+        recordError({
           user: userId || null,
           language: language.toLowerCase(),
           errorType: classifyError(errorText, language),
@@ -40,7 +57,7 @@ class CodeExecutionController {
           courseId: courseId || null,
           lessonId: lessonId || null,
           tutorialId: tutorialId || null,
-        }).catch((e) => console.warn('ErrorLog save failed:', e.message));
+        });
       }
 
       // Award points for successful execution
@@ -61,7 +78,29 @@ class CodeExecutionController {
 
     } catch (error) {
       console.error('Code execution error:', error);
-      
+
+      // Executor itself threw (Docker timeout / sandbox crash etc). Still
+      // surface this in analytics so admins see executor health issues + the
+      // user's failure doesn't disappear into a 500.
+      try {
+        const { code, language } = req.body || {};
+        if (language) {
+          const { courseId, lessonId, tutorialId } = req.body || {};
+          recordError({
+            user: req.user?._id || null,
+            language: String(language).toLowerCase(),
+            errorType: classifyError(error?.message || '', language),
+            errorMessage: String(error?.message || 'executor failed').slice(0, 1000),
+            snippet: String(code || '').slice(0, 500),
+            courseId: courseId || null,
+            lessonId: lessonId || null,
+            tutorialId: tutorialId || null,
+          });
+        }
+      } catch (_) {
+        // best-effort
+      }
+
       res.status(500).json({
         success: false,
         message: 'Code execution failed',

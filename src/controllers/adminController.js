@@ -524,6 +524,10 @@ export const createTutorial = async (req, res) => {
 const analyticsCache = new Map();
 const ANALYTICS_TTL_MS = 5 * 60 * 1000;
 
+// Allow other modules to bust the cache when fresh data is logged so admin
+// charts reflect recent activity without waiting for the 5-min TTL.
+export const invalidateAnalyticsCache = () => analyticsCache.clear();
+
 export const getAnalytics = async (req, res) => {
   try {
     const days = Math.min(parseInt(req.query.days) || 30, 365);
