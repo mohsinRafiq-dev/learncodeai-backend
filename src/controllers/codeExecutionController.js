@@ -20,7 +20,8 @@ const recordError = (payload) => {
 };
 
 const classifyError = (message = '', language = '') => {
-  const m = message.toLowerCase();
+  // Defensive: stderr/error can arrive as an object, Buffer, or undefined.
+  const m = String(message ?? "").toLowerCase();
   if (m.includes('timeout') || m.includes('timed out')) return 'timeout';
   if (m.includes('syntaxerror') || m.includes('syntax error') || m.includes('parse error')) return 'syntax';
   if (language === 'cpp' && (m.includes('compile') || m.includes('error:'))) return 'compilation';
