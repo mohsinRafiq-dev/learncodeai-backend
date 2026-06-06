@@ -33,6 +33,7 @@ import codeDraftRoutes from "./routes/codeDraftRoutes.js";
 import recommendationRoutes from "./routes/recommendationRoutes.js";
 import billingRoutes from "./routes/billingRoutes.js";
 import billingController from "./controllers/billingController.js";
+import publicSettingsRoutes from "./routes/publicSettingsRoutes.js";
 import connectDB from "./config/database.js";
 import passport, { initializeOAuthStrategies } from "./config/oauthConfig.js";
 import emailService from "./services/emailService.js";
@@ -179,6 +180,8 @@ app.use("/api/recommendations", recommendationRoutes);
 console.log("✅ Recommendation routes registered at /api/recommendations");
 app.use("/api/billing", billingRoutes);
 console.log("✅ Billing routes registered at /api/billing");
+app.use("/api/settings", publicSettingsRoutes);
+console.log("✅ Public settings route registered at /api/settings/public");
 
 // Initialize default badges on startup
 gamificationService.initializeBadges();
