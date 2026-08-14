@@ -19,12 +19,16 @@ COPY --chown=learncodeai:learncodeai package*.json ./
 RUN npm ci --only=production --audit --audit-level=moderate && \
     npm cache clean --force
 
-# Copy application code
+# Copy application code.
+# docker/ holds the executor Dockerfiles that containerManager resolves at
+# runtime; without it, building executor images from inside the container
+# cannot work.
 COPY --chown=learncodeai:learncodeai src/ ./src/
 COPY --chown=learncodeai:learncodeai scripts/ ./scripts/
+COPY --chown=learncodeai:learncodeai docker/ ./docker/
 
 # Security: Set proper permissions
-RUN chmod -R 555 ./src ./scripts
+RUN chmod -R 555 ./src ./scripts ./docker
 
 # Create necessary directories with proper permissions
 RUN mkdir -p ./temp ./logs ./uploads && \
@@ -36,9 +40,11 @@ USER learncodeai
 
 EXPOSE 4000
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:4000/health || exit 1
+# Health check.
+# The app serves /healthz, not /health — probing the wrong path marked the
+# container permanently unhealthy. start-period covers executor warm-up.
+HEALTHCHECK --interval=30s --timeout=3s --start-period=90s --retries=3 \
+    CMD curl -f http://localhost:4000/healthz || exit 1
 
 # Run the application
 CMD ["node", "src/server.js"]

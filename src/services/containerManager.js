@@ -8,6 +8,15 @@ const execAsync = promisify(exec);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+// Readiness states surfaced to the API so callers can tell "warming up" apart
+// from "broken". Without this the execute endpoint answered a startup window
+// with a confusing Piston 401.
+export const READINESS = {
+  READY: "ready",
+  STARTING: "starting",
+  UNAVAILABLE: "unavailable",
+};
+
 class ContainerManager {
   constructor() {
     this.docker = new Docker();
@@ -24,12 +33,56 @@ class ContainerManager {
     // Go up two directories from src/services to reach project root, then into docker
     this.dockerDir = path.join(__dirname, "..", "..", "docker");
     this.containerConfigs = {}; // Track successful container configurations
+
+    // Per-language readiness. Starts UNAVAILABLE so a request arriving before
+    // startAllContainers() runs is refused rather than silently downgraded.
+    this.readiness = {
+      python: READINESS.UNAVAILABLE,
+      javascript: READINESS.UNAVAILABLE,
+      cpp: READINESS.UNAVAILABLE,
+    };
+  }
+
+  /** Does a usable image already exist locally? */
+  async findExistingImage(language) {
+    const candidates = [
+      `learncodeai-${language}-fallback`,
+      `learncodeai-${language}-secure`,
+      `learncodeai-${language}-persistent`,
+    ];
+    for (const imageName of candidates) {
+      try {
+        await this.docker.getImage(imageName).inspect();
+        return imageName;
+      } catch {
+        // Not present locally; try the next candidate.
+      }
+    }
+    return null;
   }
 
   /**
-   * Build Docker image for a language
+   * Build Docker image for a language.
+   *
+   * Skips the build entirely when an image is already present. Rebuilding on
+   * every process restart cost minutes (the C++ image is >2GB) and left code
+   * execution falling through to a dead fallback for the whole window.
+   * Set REBUILD_EXECUTOR_IMAGES=1 to force a rebuild after changing a
+   * Dockerfile.
    */
-  async buildImage(language) {
+  async buildImage(language, { force = false } = {}) {
+    if (!force && process.env.REBUILD_EXECUTOR_IMAGES !== "1") {
+      const existing = await this.findExistingImage(language);
+      if (existing) {
+        console.log(`Reusing existing ${language} image: ${existing}`);
+        this.containerConfigs[language] = existing;
+        return true;
+      }
+    }
+    return this.#buildImageFromSource(language);
+  }
+
+  async #buildImageFromSource(language) {
     // Try secure configurations first, fallback to original
     const configs = [
       {
@@ -207,22 +260,61 @@ class ContainerManager {
   }
 
   /**
-   * Start all containers
+   * Start all containers.
+   *
+   * Languages are started in parallel rather than sequentially: they are
+   * independent, and serialising them meant python waited behind the multi-GB
+   * C++ build before it could serve a single request.
    */
   async startAllContainers() {
     console.log("Starting executor containers...");
     const languages = ["python", "javascript", "cpp"];
 
     for (const language of languages) {
-      try {
-        await this.buildImage(language);
-        await this.startContainer(language);
-      } catch (error) {
-        console.error(`Failed to start ${language} container:`, error.message);
-      }
+      this.readiness[language] = READINESS.STARTING;
     }
 
-    console.log("All executor containers started successfully");
+    await Promise.all(
+      languages.map(async (language) => {
+        try {
+          await this.buildImage(language);
+          await this.startContainer(language);
+          this.readiness[language] = READINESS.READY;
+          console.log(`${language} executor ready`);
+        } catch (error) {
+          this.readiness[language] = READINESS.UNAVAILABLE;
+          console.error(`Failed to start ${language} container:`, error.message);
+        }
+      })
+    );
+
+    const ready = languages.filter((l) => this.readiness[l] === READINESS.READY);
+    console.log(`Executor containers ready: ${ready.join(", ") || "none"}`);
+  }
+
+  /** Readiness for one language. */
+  getReadiness(language) {
+    return this.readiness[language] ?? READINESS.UNAVAILABLE;
+  }
+
+  /** Readiness for every language, for the health endpoint. */
+  getAllReadiness() {
+    return { ...this.readiness };
+  }
+
+  /**
+   * Re-check a container that we believe is ready, so a crashed container is
+   * reported honestly rather than trusted from stale state.
+   */
+  async refreshReadiness(language) {
+    if (this.readiness[language] !== READINESS.READY) {
+      return this.readiness[language];
+    }
+    const running = await this.isContainerRunning(language);
+    if (!running) {
+      this.readiness[language] = READINESS.UNAVAILABLE;
+    }
+    return this.readiness[language];
   }
 
   /**

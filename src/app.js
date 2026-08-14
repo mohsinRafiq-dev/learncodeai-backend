@@ -39,6 +39,7 @@ import passport, { initializeOAuthStrategies } from "./config/oauthConfig.js";
 import emailService from "./services/emailService.js";
 import gamificationService from "./services/gamificationService.js";
 import { maintenanceMode } from "./middleware/maintenanceMode.js";
+import containerManager from "./services/containerManager.js";
 import { startScheduledPublishService } from "./services/scheduledPublishService.js";
 
 // Connect to MongoDB
@@ -143,6 +144,19 @@ app.get("/", (req, res) => {
 // Health check (used by Railway/uptime monitors). Cheap and skips DB.
 app.get("/healthz", (req, res) => {
   res.status(200).json({ status: "ok", uptime: process.uptime() });
+});
+
+// Sandbox readiness, separate from process liveness. The process is healthy
+// well before the executor containers are, so conflating the two hid a
+// multi-minute window where code execution did not work.
+app.get("/readyz", (req, res) => {
+  const executors = containerManager.getAllReadiness();
+  const ready = Object.values(executors).every((s) => s === "ready");
+  res.status(ready ? 200 : 503).json({
+    status: ready ? "ready" : "starting",
+    executors,
+    uptime: process.uptime(),
+  });
 });
 
 // Maintenance gate (auth/admin paths bypass internally)

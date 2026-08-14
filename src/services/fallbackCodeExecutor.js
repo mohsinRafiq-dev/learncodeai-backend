@@ -9,13 +9,28 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 /**
- * Fallback code executor for when Docker is not available
- * Uses child_process to execute code safely with timeouts
+ * Fallback code executor for when Docker is not available.
+ *
+ * ⚠️  THIS IS NOT A SANDBOX. It shells out to `python <file>` and `node <file>`
+ * directly on the host, with no isolation, no capability dropping, and no
+ * filesystem or network restrictions. Code submitted by a user runs with the
+ * full privileges of the server process.
+ *
+ * It exists as a development convenience only. In production it refuses to run
+ * unless explicitly opted into via ALLOW_UNSANDBOXED_EXECUTION=1, because the
+ * executor chain would otherwise reach it silently whenever Docker was
+ * unavailable — turning a sandbox outage into arbitrary code execution.
  */
 class FallbackCodeExecutor {
   constructor() {
     this.tempDir = path.join(__dirname, '..', '..', 'temp');
     this.ensureTempDir();
+  }
+
+  /** Is this executor permitted to run in the current environment? */
+  isPermitted() {
+    if (process.env.ALLOW_UNSANDBOXED_EXECUTION === '1') return true;
+    return process.env.NODE_ENV !== 'production';
   }
 
   ensureTempDir() {
@@ -29,7 +44,22 @@ class FallbackCodeExecutor {
    */
   async executeCode(code, language, input = '') {
     const startTime = Date.now();
-    
+
+    if (!this.isPermitted()) {
+      console.error(
+        'Refused unsandboxed execution in production. The Docker sandbox is ' +
+        'unavailable — fix it rather than setting ALLOW_UNSANDBOXED_EXECUTION.'
+      );
+      return {
+        output:
+          'Code execution is temporarily unavailable. The secure sandbox is not ' +
+          'running, and this server will not execute code outside it.',
+        error: true,
+        executorUnavailable: true,
+        executionTime: '0ms'
+      };
+    }
+
     try {
       let command;
       let tempFile;
