@@ -21,13 +21,19 @@ class EmailService {
         return;
       }
 
+      // Google displays app passwords as four space-separated groups
+      // ("abcd efgh ijkl mnop"), but its SMTP endpoint rejects the spaces with
+      // 535-5.7.8. Copying the password as shown is the obvious thing to do,
+      // so normalise it here rather than making every operator discover this.
+      const pass = String(process.env.EMAIL_PASS).replace(/\s+/g, "");
+
       this.transporter = nodemailer.createTransport({
         host: process.env.EMAIL_HOST,
         port: process.env.EMAIL_PORT || 587,
         secure: process.env.EMAIL_SECURE === "true", // true for 465, false for other ports
         auth: {
           user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS,
+          pass,
         },
       });
 
@@ -37,6 +43,22 @@ class EmailService {
       this.initialized = true;
     } catch (error) {
       console.error("❌ Email service initialization failed:", error.message);
+
+      // 535-5.7.8 is an auth rejection, and for Gmail the cause is almost
+      // always a plain account password rather than an app password. Say so,
+      // instead of leaving the operator to decode the SMTP code.
+      if (/535|5\.7\.8|Username and Password not accepted/i.test(error.message)) {
+        const host = process.env.EMAIL_HOST || "";
+        if (host.includes("gmail")) {
+          console.error(
+            "   Gmail rejected the credentials. Regular account passwords have " +
+            "not worked over SMTP since May 2022 — generate a 16-character app " +
+            "password at https://myaccount.google.com/apppasswords (requires 2FA) " +
+            "and set it as EMAIL_PASS."
+          );
+        }
+      }
+
       this.transporter = null;
     }
   }
