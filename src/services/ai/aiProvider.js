@@ -27,6 +27,15 @@ const PROVIDERS = {
 // Errors worth retrying: transient network faults, rate limits, 5xx.
 const RETRYABLE_STATUS = new Set([408, 409, 429, 500, 502, 503, 504]);
 
+// Extra tokens added to every Gemini request to cover its reasoning pass.
+// Measured against gemini-flash-latest: a trivial prompt spends ~17-80 tokens
+// thinking, and a long grounded tutorial prompt spends substantially more.
+// Scaled by attempt number so a retry gets a strictly larger budget.
+const THINKING_HEADROOM_TOKENS = parseInt(
+  process.env.AI_THINKING_HEADROOM_TOKENS || "2048",
+  10
+);
+
 class ProviderError extends Error {
   constructor(message, { status, provider, retryable = false } = {}) {
     super(message);
@@ -110,7 +119,9 @@ class AIProvider {
         try {
           const text =
             providerName === "gemini"
-              ? await this.#callGemini({ prompt, system, temperature, maxTokens, apiKey })
+              ? await this.#callGemini({
+                  prompt, system, temperature, maxTokens, apiKey, attempt,
+                })
               : await this.#callOpenAI({ prompt, system, temperature, maxTokens, apiKey });
 
           this.#recordUsage(providerName, true);
@@ -140,15 +151,23 @@ class AIProvider {
     throw lastError ?? new ProviderError("All providers failed");
   }
 
-  async #callGemini({ prompt, system, temperature, maxTokens, apiKey }) {
+  async #callGemini({ prompt, system, temperature, maxTokens, apiKey, attempt = 1 }) {
     const model = PROVIDERS.gemini.defaultModel;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+    // Gemini's flash models reason before answering, and maxOutputTokens is a
+    // *combined* budget for thinking plus visible output. A request sized only
+    // for the answer can burn the whole budget on thinking and come back empty
+    // with finishReason MAX_TOKENS. Setting thinkingConfig.thinkingBudget = 0
+    // is not honoured by this model, so the fix is headroom, escalated on
+    // retry.
+    const headroom = THINKING_HEADROOM_TOKENS * attempt;
 
     const body = {
       contents: [{ role: "user", parts: [{ text: prompt }] }],
       generationConfig: {
         temperature,
-        maxOutputTokens: maxTokens,
+        maxOutputTokens: maxTokens + headroom,
       },
     };
     if (system) {
@@ -167,10 +186,22 @@ class AIProvider {
 
     if (!text) {
       const reason = res?.candidates?.[0]?.finishReason || "empty response";
-      throw new ProviderError(`gemini returned no text (${reason})`, {
-        provider: "gemini",
-        retryable: reason === "RECITATION" || reason === "OTHER",
-      });
+      const thought = res?.usageMetadata?.thoughtsTokenCount ?? 0;
+
+      // MAX_TOKENS with no visible output means thinking consumed the budget.
+      // Retrying is worthwhile because the headroom scales with the attempt.
+      const budgetExhausted = reason === "MAX_TOKENS";
+
+      throw new ProviderError(
+        budgetExhausted
+          ? `gemini spent the whole token budget on reasoning (${thought} thinking tokens, 0 output). ` +
+            `Raise maxTokens above ${maxTokens}.`
+          : `gemini returned no text (${reason})`,
+        {
+          provider: "gemini",
+          retryable: budgetExhausted || reason === "RECITATION" || reason === "OTHER",
+        }
+      );
     }
     return text;
   }
