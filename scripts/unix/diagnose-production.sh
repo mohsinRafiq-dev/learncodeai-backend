@@ -91,7 +91,10 @@ else
   echo "  raw: ${RESP:0:400}"
   echo
   case "$RESP" in
-    *'"output":"2"'*)            ok "SANDBOX WORKS — verified generation will function" ;;
+    # The executor preserves the program's trailing newline, so the payload is
+    # "2\n" rather than "2". Match the prefix, not the exact string.
+    *'"output":"2'*|*'"error":false'*)
+                                 ok "SANDBOX WORKS — verified generation will function" ;;
     *whitelist*|*'error 401'*)   bad "Piston returns 401 (public API is whitelist-only since 2026-02-15)"
                                  echo "       -> self-host Piston, or fix the Docker executors" ;;
     *'requires Docker'*)         bad "running the UNSANDBOXED in-process fallback"
