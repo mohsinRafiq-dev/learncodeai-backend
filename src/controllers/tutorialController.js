@@ -1,8 +1,7 @@
 import Tutorial from '../models/Tutorial.js';
 import UserSavedTutorial from '../models/UserSavedTutorial.js';
 import Feedback from '../models/Feedback.js';
-import openaiService from '../services/openaiService.js';
-import geminiService from '../services/geminiService.js';
+import verifiedTutorialService from '../services/ai/verifiedTutorialService.js';
 import gamificationService from '../services/gamificationService.js';
 import { userAccess } from '../middleware/tierMiddleware.js';
 
@@ -393,7 +392,11 @@ class TutorialController {
       
       // Check if this is an AI-generated tutorial (based on tags)
       const isAIgenerated = tags && tags.includes('AI-generated');
-      
+
+      // Populated by the verified-generation pipeline; stays null for manual
+      // tutorials and for the cached path.
+      let verification = null;
+
       let tutorialData = {
         title: title || concept,
         description: description || `Tutorial about ${concept}`,
@@ -451,14 +454,19 @@ class TutorialController {
           console.warn("Tutorial cache lookup failed:", cacheErr.message);
         }
 
-        // --- GEMINI AI GENERATION (default) ---
+        // --- VERIFIED AI GENERATION ---
+        // Grounded in the platform's own curriculum, and every code example is
+        // executed in the sandbox before it reaches a learner. Examples that
+        // cannot be made to run are dropped rather than published.
         try {
-          console.log(`Generating AI tutorial for: ${concept} in ${language} (Gemini)`);
-          const aiContent = await geminiService.generateTutorial(
-            concept,
-            language.toLowerCase(),
-            difficulty || 'beginner'
-          );
+          console.log(`Generating verified AI tutorial for: ${concept} in ${language}`);
+          const aiContent = await verifiedTutorialService.generateTutorial({
+            topic: concept,
+            language: language.toLowerCase(),
+            difficulty: difficulty || 'beginner',
+            userId,
+          });
+
           tutorialData = {
             ...tutorialData,
             title: aiContent.title,
@@ -468,9 +476,14 @@ class TutorialController {
             notes: aiContent.notes,
             tips: aiContent.tips
           };
-          console.log('AI tutorial generated successfully (Gemini)');
+          verification = aiContent.verification;
+
+          console.log(
+            `AI tutorial verified: ${verification.passedFinal}/${verification.snippetsJudged} ` +
+            `examples run (${verification.repaired} repaired, ${verification.droppedUnverified} dropped)`
+          );
         } catch (aiError) {
-          console.error('Error generating AI content (Gemini):', aiError);
+          console.error('Error generating verified AI content:', aiError);
           if (!content) {
             return res.status(500).json({
               success: false,
@@ -479,37 +492,6 @@ class TutorialController {
             });
           }
         }
-
-        /*
-        // --- OPENAI AI GENERATION (uncomment to use OpenAI instead) ---
-        try {
-          console.log(`Generating AI tutorial for: ${concept} in ${language} (OpenAI)`);
-          const aiContent = await openaiService.generateTutorial(
-            concept,
-            language.toLowerCase(),
-            difficulty || 'beginner'
-          );
-          tutorialData = {
-            ...tutorialData,
-            title: aiContent.title,
-            description: aiContent.description,
-            content: aiContent.content,
-            codeExamples: aiContent.codeExamples,
-            notes: aiContent.notes,
-            tips: aiContent.tips
-          };
-          console.log('AI tutorial generated successfully (OpenAI)');
-        } catch (openaiError) {
-          console.error('Error generating AI content (OpenAI):', openaiError);
-          if (!content) {
-            return res.status(500).json({
-              success: false,
-              message: 'Failed to generate AI content. Please try again or provide content manually.',
-              error: openaiError.message
-            });
-          }
-        }
-        */
       } else if (!title || !content) {
         // Non-AI tutorials require title and content
         return res.status(400).json({
@@ -524,13 +506,16 @@ class TutorialController {
         isPreGenerated: false,
         isAIgenerated: isAIgenerated
       });
-      
+
       await tutorial.save();
-      
+
       res.status(201).json({
         success: true,
         message: 'Tutorial created successfully',
-        data: tutorial
+        data: tutorial,
+        // Lets the UI show the "verified" badge and the sandbox evidence
+        // behind it. Null for manually authored tutorials.
+        verification
       });
     } catch (error) {
       console.error('Error creating tutorial:', error);

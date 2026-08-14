@@ -41,3 +41,11 @@ coverage/
 *.tmp
 *.tempnode_modules/
 temp/
+
+# User-uploaded content (never commit real user data)
+uploads/*
+!uploads/.gitkeep
+
+# Evaluation outputs
+evaluation/results/
+

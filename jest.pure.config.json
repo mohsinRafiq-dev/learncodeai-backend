@@ -1,0 +1,9 @@
+{
+  "testEnvironment": "node",
+  "testMatch": ["**/tests/pure/**/*.test.js"],
+  "maxWorkers": "50%",
+  "collectCoverageFrom": ["src/services/ai/**/*.js"],
+  "coverageDirectory": "coverage/pure",
+  "coverageReporters": ["text", "lcov"],
+  "testTimeout": 15000
+}
