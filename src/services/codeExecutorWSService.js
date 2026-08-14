@@ -1,10 +1,16 @@
 import WebSocket from 'ws';
-import containerManager from './containerManager.js';
+import containerManager, { READINESS } from './containerManager.js';
 import fallbackCodeExecutor from './fallbackCodeExecutor.js';
 import pistonCodeExecutor from './pistonCodeExecutor.js';
 
 // CODE_EXEC_BACKEND: "docker" (default) | "piston" | "fallback"
 const BACKEND = (process.env.CODE_EXEC_BACKEND || 'docker').toLowerCase();
+
+// Only meaningful when PISTON_URL points at a self-hosted instance. The public
+// endpoint has been whitelist-only since 2026-02-15 and answers 401, so
+// falling through to it by default produced a confusing error rather than a
+// working execution.
+const PISTON_IS_SELF_HOSTED = Boolean(process.env.PISTON_URL);
 
 class CodeExecutorWSService {
   constructor() {
@@ -70,6 +76,21 @@ class CodeExecutorWSService {
       return fallbackCodeExecutor.executeCode(code, language, input);
     }
 
+    // Report a warming-up sandbox honestly instead of falling through to a
+    // fallback that will fail with an unrelated error.
+    const readiness = await containerManager.refreshReadiness(language);
+    if (readiness === READINESS.STARTING) {
+      return {
+        output:
+          `The ${language} execution environment is still starting up. ` +
+          `This takes up to a couple of minutes after a deploy. Please try again shortly.`,
+        error: true,
+        warmingUp: true,
+        executorUnavailable: true,
+        executionTime: '0ms'
+      };
+    }
+
     try {
       // Try Docker first (with timeout)
       const dockerTimeout = 3000; // 3 second timeout for Docker attempt
@@ -81,13 +102,17 @@ class CodeExecutorWSService {
       try {
         return await Promise.race([dockerPromise, timeoutPromise]);
       } catch (dockerError) {
-        console.log(`⚠️  Docker execution failed (${dockerError.message}), trying Piston`);
-        // Final fallback chain: Piston → in-process fallback
-        try {
-          return await pistonCodeExecutor.executeCode(code, language, input);
-        } catch {
-          return await fallbackCodeExecutor.executeCode(code, language, input);
+        console.log(`⚠️  Docker execution failed (${dockerError.message})`);
+
+        // Only try Piston when it can actually serve us. The public instance
+        // returns 401, which previously surfaced to the user as the error.
+        if (PISTON_IS_SELF_HOSTED) {
+          const result = await pistonCodeExecutor.executeCode(code, language, input);
+          if (!result.error) return result;
+          console.log('⚠️  Piston execution failed, trying in-process fallback');
         }
+
+        return await fallbackCodeExecutor.executeCode(code, language, input);
       }
 
     } catch (error) {

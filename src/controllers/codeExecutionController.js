@@ -45,6 +45,18 @@ class CodeExecutionController {
       // Execute code
       const result = await codeExecutorWSService.executeCode(code, language, input);
 
+      // A sandbox that is warming up or down is an infrastructure condition,
+      // not a fault in the user's code. Answering 200 with an error string
+      // made the UI present it as a compile failure.
+      if (result?.executorUnavailable) {
+        return res.status(503).json({
+          success: false,
+          message: result.output,
+          warmingUp: Boolean(result.warmingUp),
+          retryable: true
+        });
+      }
+
       // Log execution errors for analytics (captured stderr / runtime error)
       const errorText = result?.error || result?.stderr || '';
       if (errorText) {
