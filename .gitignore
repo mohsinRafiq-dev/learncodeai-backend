@@ -49,3 +49,7 @@ uploads/*
 # Evaluation outputs
 evaluation/results/
 
+
+# Deploy script rollback marker
+.last-deploy-commit
+
