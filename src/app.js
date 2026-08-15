@@ -33,7 +33,9 @@ import codeDraftRoutes from "./routes/codeDraftRoutes.js";
 import recommendationRoutes from "./routes/recommendationRoutes.js";
 import billingRoutes from "./routes/billingRoutes.js";
 import creatorRoutes from "./routes/creatorRoutes.js";
+import creatorCourseRoutes from "./routes/creatorCourseRoutes.js";
 import adminCreatorRoutes from "./routes/adminCreatorRoutes.js";
+import adminCourseReviewRoutes from "./routes/adminCourseReviewRoutes.js";
 import billingController from "./controllers/billingController.js";
 import publicSettingsRoutes from "./routes/publicSettingsRoutes.js";
 import connectDB from "./config/database.js";
@@ -176,7 +178,10 @@ app.use("/api/admin/courses", adminCourseRoutes);
 app.use("/api/admin/tutorials", adminTutorialRoutes);
 // Must be mounted before the catch-all /api/admin router so its paths win.
 app.use("/api/admin/creators", adminCreatorRoutes);
+app.use("/api/admin/course-review", adminCourseReviewRoutes);
 app.use("/api/admin", adminRoutes);
+// Likewise: the more specific /courses router must precede /api/creator.
+app.use("/api/creator/courses", creatorCourseRoutes);
 app.use("/api/creator", creatorRoutes);
 app.use("/api/aichat", aiChatRoutes);
 app.use("/api/codehelp", codeHelpRoutes);
