@@ -8,6 +8,10 @@ import {
   accessSummary,
   entitledCourseIds,
 } from "../services/billing/entitlementService.js";
+import marketplaceService from "../services/billing/marketplaceService.js";
+import connectService from "../services/billing/connectService.js";
+import Payout from "../models/Payout.js";
+import LedgerEntry from "../models/LedgerEntry.js";
 
 // Lazy-construct Stripe so the server still boots if STRIPE_SECRET_KEY is missing
 // (useful for local dev / FYP partial setup). Routes return 503 in that case.
@@ -91,6 +95,23 @@ export const getMyBilling = async (req, res) => {
 export const getAiCredits = async (req, res) => {
   const summary = await aiCreditService.summaryFor(req.user);
   res.json({ success: true, data: summary });
+};
+
+// POST /api/billing/courses/:courseId/checkout — buy a single course.
+// The price and the 70/30 split are read from the Course and CreatorProfile;
+// nothing the client sends about money is used.
+export const createCourseCheckout = async (req, res) => {
+  try {
+    const result = await marketplaceService.createCourseCheckout({
+      user: req.user,
+      courseId: req.params.courseId,
+    });
+    res.json({ success: true, data: result });
+  } catch (error) {
+    const status = error.status ?? 500;
+    if (status === 500) console.error("Course checkout failed:", error);
+    res.status(status).json({ success: false, message: error.message });
+  }
 };
 
 // POST /api/billing/create-checkout-session
@@ -218,6 +239,14 @@ export const handleWebhook = async (req, res) => {
     switch (event.type) {
       case "checkout.session.completed": {
         const session = event.data.object;
+
+        // Marketplace course purchases carry kind=course and are fulfilled by
+        // the marketplace service, which owns the split and the ledger.
+        if (session.metadata?.kind === "course") {
+          await marketplaceService.fulfilCourseOrder(session, event.id);
+          break;
+        }
+
         const userId =
           session.metadata?.userId ||
           session.subscription_details?.metadata?.userId;
@@ -287,6 +316,47 @@ export const handleWebhook = async (req, res) => {
         break;
       }
 
+      case "charge.refunded": {
+        // A refund must revoke what it paid for, otherwise a learner keeps the
+        // course and the creator keeps the money.
+        await marketplaceService.refundCourseOrder(event.data.object, event.id);
+        break;
+      }
+
+      case "account.updated": {
+        // Connect onboarding progress. Mirrors capability flags so the Studio
+        // shows the creator exactly what Stripe is still waiting for.
+        const account = event.data.object;
+        const profile = await connectService.profileForAccount(account.id);
+        if (profile) await connectService.syncAccountStatus(profile, account);
+        break;
+      }
+
+      case "transfer.reversed":
+      case "payout.failed": {
+        // A failed payout must return the funds to the creator's balance,
+        // otherwise the money is neither with them nor available again.
+        const obj = event.data.object;
+        const payout = await Payout.findOne({ stripeTransferId: obj.id });
+        if (payout && payout.status !== "failed") {
+          payout.status = "failed";
+          payout.failureReason = obj.failure_message ?? event.type;
+          await payout.save();
+
+          await LedgerEntry.create({
+            creator: payout.creator,
+            type: "payout_reversal",
+            amountCents: payout.amountCents,
+            payout: payout._id,
+            description: `Payout failed: ${payout.failureReason}`,
+            idempotencyKey: `payout_reversal:${payout._id}`,
+          }).catch((err) => {
+            if (err.code !== 11000) throw err;
+          });
+        }
+        break;
+      }
+
       default:
         // Other event types — ignore for now.
         break;
@@ -301,6 +371,7 @@ export const handleWebhook = async (req, res) => {
 export default {
   getMyBilling,
   getAiCredits,
+  createCourseCheckout,
   createCheckoutSession,
   createPortalSession,
   handleWebhook,
