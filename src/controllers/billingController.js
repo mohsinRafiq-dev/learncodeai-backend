@@ -3,6 +3,11 @@
 
 import Stripe from "stripe";
 import User from "../models/User.js";
+import aiCreditService from "../services/billing/aiCreditService.js";
+import {
+  accessSummary,
+  entitledCourseIds,
+} from "../services/billing/entitlementService.js";
 
 // Lazy-construct Stripe so the server still boots if STRIPE_SECRET_KEY is missing
 // (useful for local dev / FYP partial setup). Routes return 503 in that case.
@@ -60,17 +65,32 @@ const ensureStripeCustomer = async (s, user) => {
 // GET /api/billing/me — what the frontend reads to render badges + portal link
 export const getMyBilling = async (req, res) => {
   const u = req.user;
+  const [credits, entitledCourses] = await Promise.all([
+    aiCreditService.summaryFor(u).catch(() => null),
+    entitledCourseIds(u._id).catch(() => []),
+  ]);
+
   res.json({
     success: true,
     data: {
       tier: u.subscriptionTier,
       status: u.subscriptionStatus,
       expiresAt: u.subscriptionExpiresAt,
-      purchasedCourses: u.purchasedCourses || [],
+      // Sourced from Entitlement rather than the deprecated array, so refunded
+      // purchases correctly disappear.
+      purchasedCourses: entitledCourses,
       hasStripeCustomer: !!u.stripeCustomerId,
       hasActiveSubscription: !!u.stripeSubscriptionId,
+      access: accessSummary(u),
+      credits,
     },
   });
+};
+
+// GET /api/billing/ai-credits — polled by the AI panels to render the meter.
+export const getAiCredits = async (req, res) => {
+  const summary = await aiCreditService.summaryFor(req.user);
+  res.json({ success: true, data: summary });
 };
 
 // POST /api/billing/create-checkout-session
@@ -280,6 +300,7 @@ export const handleWebhook = async (req, res) => {
 
 export default {
   getMyBilling,
+  getAiCredits,
   createCheckoutSession,
   createPortalSession,
   handleWebhook,

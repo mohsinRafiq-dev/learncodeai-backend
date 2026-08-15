@@ -8,6 +8,7 @@ import { auth } from "../middleware/authMiddleware.js";
 const router = express.Router();
 
 router.get("/me", auth, billingController.getMyBilling);
+router.get("/ai-credits", auth, billingController.getAiCredits);
 router.post("/create-checkout-session", auth, billingController.createCheckoutSession);
 router.post("/create-portal-session", auth, billingController.createPortalSession);
 
