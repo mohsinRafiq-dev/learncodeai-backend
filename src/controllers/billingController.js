@@ -200,19 +200,44 @@ export const createPortalSession = async (req, res) => {
   res.json({ success: true, data: { url: session.url } });
 };
 
+/**
+ * Where the current period ends.
+ *
+ * Stripe moved current_period_end from the subscription onto the subscription
+ * item, so reading it off the subscription alone silently yields undefined and
+ * leaves subscriptionExpiresAt null — no renewal date, and no expiry backstop
+ * if a cancellation webhook is ever missed. Checks both, newest location first.
+ */
+const periodEndOf = (subscription) => {
+  const seconds =
+    subscription.items?.data?.[0]?.current_period_end ??
+    subscription.current_period_end ??
+    null;
+  return seconds ? new Date(seconds * 1000) : null;
+};
+
 // Apply a successful subscription event to the user
 const applySubscriptionToUser = async (user, subscription) => {
   user.stripeSubscriptionId = subscription.id;
   user.subscriptionStatus = subscription.status;
-  user.subscriptionExpiresAt = subscription.current_period_end
-    ? new Date(subscription.current_period_end * 1000)
-    : null;
+  user.subscriptionExpiresAt = periodEndOf(subscription);
+
   const isActive = ["active", "trialing"].includes(subscription.status);
-  // Only flip to "pro" while subscription is active. If canceled, downgrade.
-  if (isActive) user.subscriptionTier = "pro";
-  else if (user.subscriptionTier !== "lifetime")
-    user.subscriptionTier = "free";
+
+  // Lifetime outranks a recurring subscription. Someone who already bought
+  // Lifetime and then subscribes must not be demoted to Pro — they paid more
+  // for permanent access, and cancelling the subscription would then strip it.
+  if (user.subscriptionTier !== "lifetime") {
+    user.subscriptionTier = isActive ? "pro" : "free";
+  }
+
   await user.save();
+
+  // Raise the AI allowance immediately on upgrade rather than at the next
+  // period, so the plan the user just paid for is the one they get.
+  await aiCreditService.syncAllocationForPlan(user).catch((err) =>
+    console.warn("Credit allocation sync failed:", err.message)
+  );
 };
 
 // POST /api/billing/webhook — Stripe webhook endpoint.

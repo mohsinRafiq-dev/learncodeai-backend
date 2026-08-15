@@ -69,11 +69,25 @@ export const getOrCreateUsage = async (user) => {
 export const syncAllocationForPlan = async (user) => {
   const usage = await getOrCreateUsage(user);
   const plan = planFor(user);
+  const currentKey = effectivePlanKey(user);
+
+  let changed = false;
+
   if (plan.aiCreditsPerMonth > usage.creditsAllocated) {
     usage.creditsAllocated = plan.aiCreditsPerMonth;
-    usage.planKey = effectivePlanKey(user);
-    await usage.save();
+    changed = true;
   }
+
+  // Keep the label current even when the allowance does not move. Pro and
+  // Lifetime grant the same credits, so without this a user who switched
+  // between them keeps the old plan name on their usage row and support ends
+  // up reading a stale answer.
+  if (usage.planKey !== currentKey) {
+    usage.planKey = currentKey;
+    changed = true;
+  }
+
+  if (changed) await usage.save();
   return usage;
 };
 
