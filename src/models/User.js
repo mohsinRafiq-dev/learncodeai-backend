@@ -47,7 +47,14 @@ const userSchema = new mongoose.Schema(
     googleId: { type: String, default: null, sparse: true },
     githubId: { type: String, default: null, sparse: true },
     isEmailVerified: { type: Boolean, default: false },
-    role: { type: String, enum: ["user", "admin"], default: "user" },
+    // `creator` is additive: a creator is still a learner with their own
+    // subscription. Granted only when a CreatorProfile is approved.
+    role: { type: String, enum: ["user", "creator", "admin"], default: "user" },
+    creatorProfile: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: "CreatorProfile",
+      default: null,
+    },
     lastLogin: { type: Date, default: null },
     profilePicture: { type: String, default: null },
 
@@ -83,13 +90,16 @@ const userSchema = new mongoose.Schema(
     // Stripe identifiers, used to create portal sessions / reconcile webhooks.
     stripeCustomerId: { type: String, default: null, index: true },
     stripeSubscriptionId: { type: String, default: null },
-    // Course IDs the user bought individually ($19 single-course purchase).
-    // Grants access to one specific course even on the free tier.
+    // DEPRECATED — superseded by the Entitlement collection, which records why
+    // access was granted and can expire or be revoked on refund. Kept and
+    // backfilled for one release so nothing breaks mid-migration; read through
+    // entitlementService, never directly.
     purchasedCourses: [
       { type: mongoose.Schema.Types.ObjectId, ref: "Course" },
     ],
-    // Daily AI prompt count + last reset day (UTC), used to rate-limit
-    // free tier (5/day) and apply soft cap on Pro (500/day) for cost control.
+
+    // DEPRECATED — superseded by the AiUsage collection, which meters monthly
+    // credits per action. These were never actually enforced.
     aiPromptsUsedToday: { type: Number, default: 0 },
     aiPromptsResetAt: { type: Date, default: null },
 

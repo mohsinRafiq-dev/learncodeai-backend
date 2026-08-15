@@ -105,7 +105,57 @@ const courseSchema = new mongoose.Schema(
       type: Number,
       default: 0,
     },
+    // ---------- Marketplace ----------
+    // Who owns the revenue. Platform courses are included in Pro and pay no
+    // creator share; marketplace courses are sold with a 70/30 split.
+    ownership: {
+      type: String,
+      enum: ["platform", "marketplace"],
+      default: "platform",
+      index: true,
+    },
+
+    // Integer minor units (cents). 0 = free. Never a float.
+    priceCents: {
+      type: Number,
+      default: 0,
+      min: 0,
+    },
+    currency: { type: String, default: "usd" },
+
+    // Creator has opted this course into the Pro catalogue: Pro subscribers
+    // read it at no extra cost and the creator earns from the monthly revenue
+    // pool instead of per-sale.
+    includedInPro: { type: Boolean, default: false, index: true },
+    // Set when opting out, so a creator cannot withdraw content mid-period
+    // after accruing pool credit.
+    proOptOutEffectiveAt: { type: Date, default: null },
+
+    // ---------- Lifecycle ----------
+    // draft -> pending_review -> approved -> published
+    //                   |
+    //                   +-> rejected -> (edit) -> draft
+    status: {
+      type: String,
+      enum: ["draft", "pending_review", "approved", "rejected", "published", "suspended"],
+      default: "draft",
+      index: true,
+    },
+    submittedAt: { type: Date, default: null },
+    reviewedBy: { type: mongoose.Schema.Types.ObjectId, ref: "User", default: null },
+    reviewedAt: { type: Date, default: null },
+    // Shown to the creator on rejection so the decision is actionable.
+    reviewNotes: { type: String, maxlength: 2000, default: null },
+    publishedAt: { type: Date, default: null },
+
+    // ---------- Sales aggregates ----------
+    // Denormalised for dashboards. Order is authoritative.
+    salesCount: { type: Number, default: 0 },
+    grossRevenueCents: { type: Number, default: 0 },
+
     // Status
+    // Retained for compatibility with existing queries; kept in sync with
+    // `status` by the lifecycle service. New code should read `status`.
     isPublished: {
       type: Boolean,
       default: false,
@@ -134,6 +184,30 @@ courseSchema.index({ language: 1, category: 1 });
 courseSchema.index({ instructor: 1 });
 courseSchema.index({ isPublished: 1, isArchived: 1 });
 courseSchema.index({ category: 1, difficulty: 1 });
+// Marketplace catalogue and the admin review queue.
+courseSchema.index({ status: 1, ownership: 1 });
+courseSchema.index({ instructor: 1, status: 1 });
+
+courseSchema.virtual("isFree").get(function () {
+  return (this.priceCents ?? 0) === 0;
+});
+
+// Is this course currently purchasable by a learner?
+courseSchema.methods.isPurchasable = function () {
+  return this.status === "published" && !this.isArchived && (this.priceCents ?? 0) > 0;
+};
+
+// Keep the legacy boolean in step with the lifecycle state, so existing
+// queries filtering on isPublished continue to behave.
+courseSchema.pre("save", function (next) {
+  if (this.isModified("status")) {
+    this.isPublished = this.status === "published";
+    if (this.status === "published" && !this.publishedAt) {
+      this.publishedAt = new Date();
+    }
+  }
+  next();
+});
 
 const Course = mongoose.model("Course", courseSchema);
 export default Course;
