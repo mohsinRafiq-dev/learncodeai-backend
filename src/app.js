@@ -34,6 +34,7 @@ import recommendationRoutes from "./routes/recommendationRoutes.js";
 import billingRoutes from "./routes/billingRoutes.js";
 import creatorRoutes from "./routes/creatorRoutes.js";
 import creatorCourseRoutes from "./routes/creatorCourseRoutes.js";
+import marketplaceRoutes from "./routes/marketplaceRoutes.js";
 import adminCreatorRoutes from "./routes/adminCreatorRoutes.js";
 import adminCourseReviewRoutes from "./routes/adminCourseReviewRoutes.js";
 import billingController from "./controllers/billingController.js";
@@ -183,6 +184,7 @@ app.use("/api/admin", adminRoutes);
 // Likewise: the more specific /courses router must precede /api/creator.
 app.use("/api/creator/courses", creatorCourseRoutes);
 app.use("/api/creator", creatorRoutes);
+app.use("/api/marketplace", marketplaceRoutes);
 app.use("/api/aichat", aiChatRoutes);
 app.use("/api/codehelp", codeHelpRoutes);
 app.use("/api/codechat", codeChatRoutes);
