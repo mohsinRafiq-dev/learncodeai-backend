@@ -43,9 +43,15 @@ const run = async () => {
   // Courses with no ownership are the platform's own curriculum: they predate
   // the marketplace and were authored by the team, not by a creator.
   const needsOwnership = all.filter((c) => !c.ownership);
+  // Mongoose defaults apply at creation, not retroactively, and .lean() does not
+  // fill them in — so documents written before priceCents existed simply lack
+  // the key. Callers then have to guard every read with ?? 0, and any that
+  // forget produce NaN in a price.
+  const needsPrice = all.filter((c) => c.priceCents === undefined || c.priceCents === null);
 
   console.log(`to mark published : ${needsPublish.length}`);
   console.log(`to set ownership  : ${needsOwnership.length}`);
+  console.log(`to set priceCents : ${needsPrice.length}`);
 
   for (const c of needsPublish.slice(0, 10)) {
     console.log(`  ${c.title?.slice(0, 60)}  ${c.status} -> published`);
@@ -86,8 +92,20 @@ const run = async () => {
     owned = res.modifiedCount;
   }
 
+  let priced = 0;
+  if (needsPrice.length) {
+    const res = await Course.updateMany(
+      { $or: [{ priceCents: { $exists: false } }, { priceCents: null }] },
+      // Platform courses are covered by the subscription rather than sold
+      // individually, so zero is the correct value, not a placeholder.
+      { $set: { priceCents: 0, currency: "usd" } }
+    );
+    priced = res.modifiedCount;
+  }
+
   console.log(`\nmarked published : ${published}`);
   console.log(`ownership set    : ${owned}`);
+  console.log(`priceCents set   : ${priced}`);
 
   const after = await Course.aggregate([{ $group: { _id: "$status", n: { $sum: 1 } } }]);
   console.log(`final status spread: ${JSON.stringify(Object.fromEntries(after.map((r) => [r._id, r.n])))}\n`);
