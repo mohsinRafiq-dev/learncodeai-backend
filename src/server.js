@@ -42,11 +42,23 @@ async function startServer() {
 
 // Graceful shutdown
 async function shutdown() {
-  // Close WebSocket connections
+  // Close our WebSocket connections to the executors.
   codeExecutorWSService.closeAllConnections();
 
-  // Stop all containers
-  await containerManager.stopAllContainers();
+  // The executor containers are deliberately LEFT RUNNING.
+  //
+  // stopAllContainers() stops and *removes* them, so every deploy destroyed all
+  // three and the next boot had to recreate them — on new random host ports,
+  // and unavailable for the seconds it took their WebSocket servers to listen.
+  // That was the whole cause of code execution breaking after a restart.
+  //
+  // They are long-lived sandboxes with no state worth reclaiming, so leaving
+  // them up means a restart reconnects immediately. Set
+  // STOP_EXECUTORS_ON_SHUTDOWN=1 to restore the old behaviour when you actually
+  // want a clean slate (e.g. after changing a Dockerfile).
+  if (process.env.STOP_EXECUTORS_ON_SHUTDOWN === "1") {
+    await containerManager.stopAllContainers();
+  }
 
   // Close HTTP server
   server.close(() => {

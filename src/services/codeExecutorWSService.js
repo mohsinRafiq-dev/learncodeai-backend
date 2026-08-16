@@ -26,27 +26,33 @@ class CodeExecutorWSService {
   /**
    * Get or create WebSocket connection to a container
    */
-  async getConnection(language) {
-    // Check if we have an existing valid connection
-    if (this.wsConnections[language] && this.wsConnections[language].readyState === WebSocket.OPEN) {
-      return this.wsConnections[language];
-    }
-
-    // Create new connection
-    const port = await containerManager.getContainerPort(language);
-    const wsUrl = `ws://localhost:${port}`;
-    
+  /** One connection attempt. Resolves on open, rejects on error or timeout. */
+  #connectOnce(language, port) {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(wsUrl);
-      
+      const ws = new WebSocket(`ws://localhost:${port}`);
+      let settled = false;
+
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          try { ws.terminate(); } catch { /* already gone */ }
+          reject(new Error(`Timeout connecting to ${language} executor`));
+        }
+      }, 5000);
+
       ws.on('open', () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         console.log(`WebSocket connected to ${language} executor`);
         this.wsConnections[language] = ws;
         resolve(ws);
       });
 
       ws.on('error', (error) => {
-        console.error(`WebSocket error for ${language}:`, error.message);
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         reject(error);
       });
 
@@ -54,14 +60,41 @@ class CodeExecutorWSService {
         console.log(`WebSocket disconnected from ${language} executor`);
         this.wsConnections[language] = null;
       });
-
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        if (ws.readyState !== WebSocket.OPEN) {
-          reject(new Error(`Timeout connecting to ${language} executor`));
-        }
-      }, 5000);
     });
+  }
+
+  /**
+   * Connection to a language's executor, reusing an open one.
+   *
+   * A freshly created container reports "running" and even "healthy" before the
+   * WebSocket server inside it is listening, so a single immediate attempt gets
+   * ECONNRESET on a container that is about to be perfectly fine. Retries with
+   * a short backoff and re-reads the port each time, since a recreated
+   * container is published on a different random host port.
+   */
+  async getConnection(language, { attempts = 5 } = {}) {
+    const existing = this.wsConnections[language];
+    if (existing && existing.readyState === WebSocket.OPEN) return existing;
+
+    let lastError;
+    for (let i = 0; i < attempts; i++) {
+      try {
+        const port = await containerManager.getContainerPort(language);
+        return await this.#connectOnce(language, port);
+      } catch (err) {
+        lastError = err;
+        if (i < attempts - 1) {
+          // 0.5s, 1s, 1.5s, 2s — about 5s total, comfortably covering the
+          // startup gap without stalling a genuinely broken container.
+          await new Promise((r) => setTimeout(r, 500 * (i + 1)));
+        }
+      }
+    }
+
+    console.error(
+      `Could not connect to ${language} executor after ${attempts} attempts: ${lastError?.message}`
+    );
+    throw lastError ?? new Error(`Could not connect to ${language} executor`);
   }
 
   /**
