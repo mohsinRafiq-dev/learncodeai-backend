@@ -20,8 +20,14 @@ export const getDashboardStats = async (req, res) => {
     const activeUsers = await User.countDocuments({ accountStatus: "active" });
     const suspendedUsers = await User.countDocuments({ accountStatus: "suspended" });
     const totalTutorials = await Tutorial.countDocuments();
+    // The dashboard card is labelled "Published Tutorials" but was fed the
+    // unfiltered total, so it read 78 while the public site correctly showed
+    // 72 — the difference being unpublished drafts. Both are returned now so
+    // the card can show what its label promises.
+    const publishedTutorials = await Tutorial.countDocuments({ isPublished: true });
     const totalChats = await AIChat.countDocuments();
     const totalCourses = await Course.countDocuments();
+    const publishedCourses = await Course.countDocuments({ status: "published" });
     const totalEnrollments = await CourseEnrollment.countDocuments();
 
     // Get user registration trend (last 30 days)
@@ -87,8 +93,10 @@ export const getDashboardStats = async (req, res) => {
         activeUsers,
         suspendedUsers,
         totalTutorials,
+        publishedTutorials,
         totalChats,
         totalCourses,
+        publishedCourses,
         totalEnrollments,
         newUsersLast30Days,
         suspensionRate: ((suspendedUsers / totalUsers) * 100).toFixed(2),
