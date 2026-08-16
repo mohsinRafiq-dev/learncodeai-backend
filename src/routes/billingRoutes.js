@@ -7,6 +7,10 @@ import { auth } from "../middleware/authMiddleware.js";
 
 const router = express.Router();
 
+// Public: the pricing page reads this so it can never quote a price that
+// differs from what Stripe charges.
+router.get("/plans", billingController.getPlans);
+
 router.get("/me", auth, billingController.getMyBilling);
 router.get("/ai-credits", auth, billingController.getAiCredits);
 router.post("/courses/:courseId/checkout", auth, billingController.createCourseCheckout);

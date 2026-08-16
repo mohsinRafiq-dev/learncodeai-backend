@@ -12,6 +12,7 @@ import marketplaceService from "../services/billing/marketplaceService.js";
 import connectService from "../services/billing/connectService.js";
 import Payout from "../models/Payout.js";
 import LedgerEntry from "../models/LedgerEntry.js";
+import { PLANS, PLAN, AI_ACTION_COST } from "../config/monetization.js";
 
 // Lazy-construct Stripe so the server still boots if STRIPE_SECRET_KEY is missing
 // (useful for local dev / FYP partial setup). Routes return 503 in that case.
@@ -95,6 +96,53 @@ export const getMyBilling = async (req, res) => {
 export const getAiCredits = async (req, res) => {
   const summary = await aiCreditService.summaryFor(req.user);
   res.json({ success: true, data: summary });
+};
+
+// GET /api/billing/plans — public plan catalogue.
+//
+// Served from config/monetization.js, the same source the Stripe prices were
+// created from. The pricing page previously hard-coded its own numbers and had
+// drifted: it advertised $6/mo and $49/yr while Stripe was configured to charge
+// $9 and $79. A page that quotes a different price from the one on the invoice
+// is the worst kind of billing bug, so the numbers now have one origin.
+export const getPlans = async (_req, res) => {
+  const shape = (key) => {
+    const p = PLANS[key];
+    return {
+      key,
+      name: p.name,
+      priceCents: p.priceCents,
+      yearlyPriceCents: p.yearlyPriceCents ?? null,
+      interval: p.interval,
+      limits: {
+        aiCreditsPerMonth: p.aiCreditsPerMonth,
+        codeExecutionsPerDay: p.codeExecutionsPerDay,
+        // Infinity does not survive JSON, so it becomes null and the client
+        // renders "Unlimited".
+        savedSnippets: Number.isFinite(p.savedSnippets) ? p.savedSnippets : null,
+        quizAttemptsPerQuiz: Number.isFinite(p.quizAttemptsPerQuiz)
+          ? p.quizAttemptsPerQuiz
+          : null,
+      },
+      features: {
+        tutorialDifficulties: p.tutorialDifficulties,
+        platformCoursesIncluded: p.platformCoursesIncluded,
+        proCatalogueIncluded: p.proCatalogueIncluded,
+        certificates: p.certificates,
+        verifiedGeneration: p.verifiedGeneration,
+        prioritySupport: p.prioritySupport,
+      },
+    };
+  };
+
+  res.json({
+    success: true,
+    data: {
+      plans: [shape(PLAN.FREE), shape(PLAN.PRO), shape(PLAN.LIFETIME)],
+      aiActionCosts: AI_ACTION_COST,
+      currency: "usd",
+    },
+  });
 };
 
 // POST /api/billing/courses/:courseId/checkout — buy a single course.
@@ -396,6 +444,7 @@ export const handleWebhook = async (req, res) => {
 export default {
   getMyBilling,
   getAiCredits,
+  getPlans,
   createCourseCheckout,
   createCheckoutSession,
   createPortalSession,
