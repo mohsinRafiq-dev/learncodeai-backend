@@ -58,15 +58,28 @@ fi
 step "Import smoke test"
 # Cheap substitute for the full suite: proves every new module loads under the
 # production dependency set, which is what --omit=dev could plausibly break.
-node --input-type=module -e "
+#
+# app.js is deliberately NOT imported here: importing it opens a Mongo
+# connection and starts the executor containers, and with no explicit exit the
+# process then hangs forever mid-deploy. The explicit process.exit below guards
+# against the same thing from any module with a live handle.
+timeout 60 node --input-type=module -e "
 for (const m of [
   './src/services/ai/aiProvider.js',
   './src/services/ai/retrievalService.js',
   './src/services/ai/verifiedGeneration.js',
   './src/services/ai/verifiedTutorialService.js',
+  './src/services/billing/entitlementService.js',
+  './src/services/billing/aiCreditService.js',
+  './src/services/billing/marketplaceService.js',
+  './src/services/billing/connectService.js',
+  './src/services/billing/courseLifecycleService.js',
   './src/controllers/tutorialController.js',
+  './src/controllers/billingController.js',
+  './src/controllers/creatorCourseController.js',
 ]) { await import(m); }
 console.log('   all modules import cleanly');
+process.exit(0);
 " || die "module import failed — production untouched"
 
 step "Restarting $APP_NAME"

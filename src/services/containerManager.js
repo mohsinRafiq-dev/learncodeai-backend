@@ -204,17 +204,61 @@ class ContainerManager {
   }
 
   /**
-   * Get the WebSocket port for a container
+   * Re-resolve a container by name, discarding whatever we had cached.
+   *
+   * Containers are published on a randomly-assigned host port, so recreating
+   * one moves it. A cached handle then reports the previous port and every
+   * connection fails with ECONNRESET while the container is demonstrably
+   * healthy.
+   */
+  async refreshContainer(language) {
+    const name = this.containerNames[language];
+    try {
+      const container = this.docker.getContainer(name);
+      const info = await container.inspect();
+      if (!info.State.Running) {
+        this.readiness[language] = READINESS.UNAVAILABLE;
+        return null;
+      }
+      this.containers[language] = container;
+      this.readiness[language] = READINESS.READY;
+      return container;
+    } catch {
+      this.containers[language] = null;
+      this.readiness[language] = READINESS.UNAVAILABLE;
+      return null;
+    }
+  }
+
+  /**
+   * Get the WebSocket port for a container.
+   *
+   * Always inspects live rather than caching the port: the cost is one local
+   * Docker API call, and the alternative is silently talking to a port that
+   * moved.
    */
   async getContainerPort(language) {
-    const container = this.containers[language];
+    let container = this.containers[language];
     if (!container) {
-      throw new Error(`${language} container not found`);
+      container = await this.refreshContainer(language);
+      if (!container) throw new Error(`${language} container not found`);
     }
 
-    const info = await container.inspect();
-    const port = info.NetworkSettings.Ports["8765/tcp"][0].HostPort;
-    return port;
+    let info;
+    try {
+      info = await container.inspect();
+    } catch {
+      // The handle is stale (container recreated or removed) — re-resolve once.
+      container = await this.refreshContainer(language);
+      if (!container) throw new Error(`${language} container not found`);
+      info = await container.inspect();
+    }
+
+    const binding = info.NetworkSettings?.Ports?.["8765/tcp"]?.[0];
+    if (!binding?.HostPort) {
+      throw new Error(`${language} container has no published port`);
+    }
+    return binding.HostPort;
   }
 
   /**

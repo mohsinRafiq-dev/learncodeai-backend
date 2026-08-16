@@ -92,17 +92,42 @@ class CodeExecutorWSService {
     }
 
     try {
-      // Try Docker first (with timeout)
-      const dockerTimeout = 3000; // 3 second timeout for Docker attempt
-      const dockerPromise = this.executeViaDocker(code, language, input);
-      const timeoutPromise = new Promise((resolve, reject) =>
-        setTimeout(() => reject(new Error('Docker timeout')), dockerTimeout)
-      );
+      // Docker attempt, with one retry against a freshly-resolved container.
+      //
+      // Containers publish on a random host port, so recreating one moves it.
+      // A cached socket then fails with ECONNRESET even though the container is
+      // healthy. Retrying blindly would hit the same stale port, so the cached
+      // connection and container handle are both discarded first.
+      const attempt = () => {
+        const dockerPromise = this.executeViaDocker(code, language, input);
+        const timeoutPromise = new Promise((_resolve, reject) =>
+          setTimeout(() => reject(new Error('Docker timeout')), 30000)
+        );
+        return Promise.race([dockerPromise, timeoutPromise]);
+      };
 
       try {
-        return await Promise.race([dockerPromise, timeoutPromise]);
-      } catch (dockerError) {
-        console.log(`⚠️  Docker execution failed (${dockerError.message})`);
+        return await attempt();
+      } catch (firstError) {
+        const msg = String(firstError?.message ?? firstError);
+        const looksStale = /ECONNRESET|ECONNREFUSED|socket hang up|not found|no published port/i.test(msg);
+
+        if (looksStale) {
+          console.log(`⚠️  Executor connection stale (${msg}); re-resolving ${language}`);
+          try {
+            this.wsConnections[language]?.terminate?.();
+          } catch { /* already gone */ }
+          this.wsConnections[language] = null;
+          await containerManager.refreshContainer(language);
+
+          try {
+            return await attempt();
+          } catch (secondError) {
+            console.log(`⚠️  Docker execution failed after refresh (${secondError.message})`);
+          }
+        } else {
+          console.log(`⚠️  Docker execution failed (${msg})`);
+        }
 
         // Only try Piston when it can actually serve us. The public instance
         // returns 401, which previously surfaced to the user as the error.
