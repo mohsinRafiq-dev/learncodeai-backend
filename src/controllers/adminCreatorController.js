@@ -117,6 +117,9 @@ export const decide = async (req, res) => {
       });
     }
 
+    // Needed to decide the role change without clobbering an existing one.
+    const user = await User.findById(profile.user).select("role");
+
     profile.status = decision === "approve" ? "approved" : "rejected";
     profile.review = {
       reviewedBy: req.user._id,
@@ -141,11 +144,15 @@ export const decide = async (req, res) => {
 
     await profile.save();
 
-    // The role is what actually unlocks the Studio; the profile alone does not.
+    // The role is what unlocks the Studio, but it must never overwrite admin.
+    // Creator status is additive (docs/BUSINESS_MODEL.md §1): an admin who is
+    // approved as a creator is both, and blanket-assigning "creator" silently
+    // stripped their admin access — locking them out of this very screen.
     if (decision === "approve") {
       await User.findByIdAndUpdate(profile.user, {
-        role: "creator",
         creatorProfile: profile._id,
+        // Only promote an ordinary user; leave admin (and creator) alone.
+        ...(user?.role === "user" ? { role: "creator" } : {}),
       });
     }
 
@@ -176,6 +183,10 @@ export const setSuspension = async (req, res) => {
       return res.status(404).json({ success: false, message: "Creator not found." });
     }
 
+    // Same rule as approval: suspending a creator must not strip an unrelated
+    // admin role. Only the creator role is added or removed here.
+    const target = await User.findById(profile.user).select("role");
+
     if (suspend) {
       profile.status = "suspended";
       profile.review.reason = reason ?? "Suspended by admin";
@@ -186,11 +197,15 @@ export const setSuspension = async (req, res) => {
         { instructor: profile.user, status: "published" },
         { $set: { status: "suspended", isPublished: false } }
       );
-      await User.findByIdAndUpdate(profile.user, { role: "user" });
+      if (target?.role === "creator") {
+        await User.findByIdAndUpdate(profile.user, { role: "user" });
+      }
     } else {
       profile.status = "approved";
       profile.review.reason = null;
-      await User.findByIdAndUpdate(profile.user, { role: "creator" });
+      if (target?.role === "user") {
+        await User.findByIdAndUpdate(profile.user, { role: "creator" });
+      }
     }
 
     await profile.save();

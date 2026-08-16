@@ -28,6 +28,10 @@ export const requireCreator = async (req, res, next) => {
       });
     }
 
+    // Gate on the profile, not on User.role. An admin keeps role "admin" even
+    // once approved as a creator — the role is additive and admin outranks it —
+    // so checking the role here would lock admins out of their own Studio.
+
     if (profile.status !== "approved") {
       const messages = {
         pending: "Your creator application is still under review.",
